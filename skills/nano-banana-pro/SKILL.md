@@ -1,11 +1,11 @@
 ---
 name: nano-banana-pro
-description: Generate/edit images with Nano Banana Pro (Gemini 3 Pro Image). Use for image create/modify requests incl. edits. Supports text-to-image + image-to-image; 1K/2K/4K; use --input-image.
+description: Generate/edit images with Nano Banana 2 (Gemini 3.1 Flash Image Preview). Use for image create/modify requests incl. edits. Supports text-to-image + image-to-image; 1K/2K/4K; use --input-image.
 ---
 
-# Nano Banana Pro Image Generation & Editing
+# Nano Banana 2 Image Generation & Editing
 
-Generate new images or edit existing ones using Google's Nano Banana Pro API (Gemini 3 Pro Image).
+Generate new images or edit existing ones using Google's Nano Banana 2 API (Gemini 3.1 Flash Image Preview).
 
 ## Usage
 
@@ -36,7 +36,7 @@ Goal: fast iteration without burning time on 4K until the prompt is correct.
 
 ## Resolution Options
 
-The Gemini 3 Pro Image API supports three resolutions (uppercase K required):
+The Gemini 3.1 Flash Image Preview API supports three resolutions (uppercase K required):
 
 - **1K** (default) - ~1024px resolution
 - **2K** - ~2048px resolution

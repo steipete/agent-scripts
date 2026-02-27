@@ -4,7 +4,7 @@
 # dependencies = ["google-genai", "Pillow"]
 # ///
 """
-nanobanana - Image editing with Gemini's Nano Banana Pro API
+nanobanana - Image editing with Gemini's Nano Banana 2 API
 Usage: nanobanana <image-path> "<prompt>" [output-path]
 
 Examples:
@@ -46,12 +46,12 @@ def edit_image(image_path: str, prompt: str, output_path: str | None = None) -> 
         base, ext = os.path.splitext(image_path)
         output_path = f"{base}_edited{ext}"
 
-    print(f"🍌 Sending to Nano Banana Pro...")
+    print(f"🍌 Sending to Nano Banana 2...")
     print(f"   Prompt: {prompt}")
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-flash-image",
+            model="gemini-3.1-flash-image-preview",
             contents=[prompt, image],
             config=genai.types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
         )
