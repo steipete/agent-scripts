@@ -16,7 +16,7 @@ import path from 'node:path';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { inspect } from 'node:util';
-import puppeteer from 'puppeteer-core';
+import puppeteer, { type HTTPRequest } from 'puppeteer-core';
 
 /** Utility type so TypeScript knows the async function constructor */
 type AsyncFunctionCtor = new (...args: string[]) => (...fnArgs: unknown[]) => Promise<unknown>;
@@ -573,6 +573,129 @@ program
         // One-shot mode with timeout
         const duration = timeout ?? 5;
         console.log(gray(`Capturing console logs for ${duration} seconds...`));
+        await new Promise((resolve) => setTimeout(resolve, duration * 1000));
+      }
+    } finally {
+      await browser.disconnect();
+    }
+  });
+
+program
+  .command('network')
+  .description('Capture network requests from the active tab from attach time; websocket shows only the upgrade handshake.')
+  .option('--port <number>', 'Debugger port (default: 9222)', (value) => Number.parseInt(value, 10), DEFAULT_PORT)
+  .option('--types <list>', 'Comma-separated resource types (e.g., xhr,fetch,document). Default: all')
+  .option('--follow', 'Continuous monitoring mode (like tail -f)', false)
+  .option('--timeout <seconds>', 'Capture duration in seconds (default: 5 for one-shot, infinite for --follow)', (value) => Number.parseInt(value, 10))
+  .option('--color', 'Force color output')
+  .option('--no-color', 'Disable color output')
+  .action(async (options) => {
+    const port = options.port as number;
+    const follow = options.follow as boolean;
+    const timeout = options.timeout as number | undefined;
+    const typesFilter = options.types as string | undefined;
+
+    // Track explicit color flags by looking at argv to avoid Commander defaults overriding TTY detection.
+    const argv = process.argv.slice(2);
+    const colorFlag = argv.includes('--color') ? true : argv.includes('--no-color') ? false : undefined;
+
+    // Determine if we should use colors: explicit flag or TTY auto-detection
+    const useColor = colorFlag ?? process.stdout.isTTY;
+
+    const allowedTypes = typesFilter
+      ? new Set(typesFilter.split(',').map((t) => t.trim().toLowerCase()))
+      : null; // null means show all types
+
+    // Color functions (no-op if colors disabled)
+    const colorize = (text: string, colorCode: string) => (useColor ? `\x1b[${colorCode}m${text}\x1b[0m` : text);
+    const red = (text: string) => colorize(text, '31');
+    const yellow = (text: string) => colorize(text, '33');
+    const green = (text: string) => colorize(text, '32');
+    const cyan = (text: string) => colorize(text, '36');
+    const gray = (text: string) => colorize(text, '90');
+    const white = (text: string) => text;
+
+    const statusColor = (status: number) => {
+      if (status >= 400) return red;
+      if (status >= 300) return yellow;
+      if (status >= 200) return green;
+      return white;
+    };
+
+    const pad = (s: string, width: number) => (s.length >= width ? s : s + ' '.repeat(width - s.length));
+
+    // Helper function definitions (outside try/catch as they don't need error handling)
+    const formatTimestamp = () => {
+      const now = new Date();
+      return now.toTimeString().split(' ')[0] + '.' + now.getMilliseconds().toString().padStart(3, '0');
+    };
+
+    // Execution code (needs try/catch for error handling)
+    const { browser, page } = await getActivePage(port);
+
+    try {
+      // Same HTTPRequest instance reaches response/failure; WeakMap avoids URL collisions.
+      const requestStartedAt = new WeakMap<HTTPRequest, number>();
+
+      page.on('request', (req) => {
+        const resourceType = req.resourceType();
+        if (allowedTypes && !allowedTypes.has(resourceType)) {
+          return;
+        }
+        requestStartedAt.set(req, Date.now());
+        console.log(`${cyan('[REQ ]')} ${gray(formatTimestamp())} ${pad(req.method(), 6)} ${pad(resourceType, 9)} ${req.url()}`);
+      });
+
+      page.on('response', (resp) => {
+        const req = resp.request();
+        const resourceType = req.resourceType();
+        if (allowedTypes && !allowedTypes.has(resourceType)) {
+          return;
+        }
+        const status = resp.status();
+        const startedAt = requestStartedAt.get(req);
+        const ms = startedAt !== undefined ? Date.now() - startedAt : undefined;
+        const durationStr = ms !== undefined ? gray(` (${ms}ms)`) : '';
+        console.log(`${statusColor(status)('[RESP]')} ${gray(formatTimestamp())} ${pad(String(status), 6)} ${pad(resourceType, 9)} ${req.url()}${durationStr}`);
+      });
+
+      page.on('requestfailed', (req) => {
+        const resourceType = req.resourceType();
+        if (allowedTypes && !allowedTypes.has(resourceType)) {
+          return;
+        }
+        const failure = req.failure();
+        const reason = failure ? failure.errorText : 'unknown';
+        console.log(`${red('[FAIL]')} ${gray(formatTimestamp())} ${pad(req.method(), 6)} ${pad(resourceType, 9)} ${req.url()}  ${red('(' + reason + ')')}`);
+      });
+
+      if (follow) {
+        // Continuous monitoring mode
+        console.log(gray('Monitoring network requests (Ctrl+C to stop)...'));
+        const waitForExit = () =>
+          new Promise<void>((resolve) => {
+            const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+            const onSignal = () => {
+              cleanup();
+              resolve();
+            };
+            const onBeforeExit = () => {
+              cleanup();
+              resolve();
+            };
+            const cleanup = () => {
+              signals.forEach((signal) => process.off(signal, onSignal));
+              process.off('beforeExit', onBeforeExit);
+            };
+            signals.forEach((signal) => process.on(signal, onSignal));
+            process.on('beforeExit', onBeforeExit);
+          });
+
+        await waitForExit();
+      } else {
+        // One-shot mode with timeout
+        const duration = timeout ?? 5;
+        console.log(gray(`Capturing network requests for ${duration} seconds...`));
         await new Promise((resolve) => setTimeout(resolve, duration * 1000));
       }
     } finally {
