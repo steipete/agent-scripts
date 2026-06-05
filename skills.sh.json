@@ -1,0 +1,90 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "title": "Agent Workflows",
+      "description": "Skills for agent instructions, transcript handling, skill hygiene, and reusable workflow design.",
+      "skills": [
+        "agent-transcript",
+        "create-cli",
+        "frontend-design",
+        "markdown-converter",
+        "oracle",
+        "skill-cleaner"
+      ]
+    },
+    {
+      "title": "GitHub & OpenClaw",
+      "description": "Skills for GitHub review, cache hygiene, project triage, and OpenClaw agent operations.",
+      "skills": [
+        "clawsweeper-status",
+        "codex-debugging",
+        "discord-clawd",
+        "github-author-context",
+        "github-cache-hygiene",
+        "github-deep-review",
+        "github-project-triage",
+        "openclaw-relay"
+      ]
+    },
+    {
+      "title": "Apple & Native Apps",
+      "description": "Skills for Swift, SwiftUI, Instruments, Hopper, app releases, and macOS VM labs.",
+      "skills": [
+        "hopper-debugger",
+        "instruments-profiling",
+        "native-app-performance",
+        "release-mac-app",
+        "swift-concurrency-expert",
+        "swiftui-liquid-glass",
+        "swiftui-performance-audit",
+        "swiftui-view-refactor",
+        "vm-lab"
+      ]
+    },
+    {
+      "title": "Browser, Media & AI",
+      "description": "Skills for browser automation, screenshots, image generation, video transcripts, and X API work.",
+      "skills": [
+        "browser-use",
+        "nano-banana-pro",
+        "openai-image-gen",
+        "peekaboo",
+        "video-transcript-downloader",
+        "xurl"
+      ]
+    },
+    {
+      "title": "Comms & Knowledge",
+      "description": "Skills for messaging, notes, reminders, music, speaking workflows, and personal archives.",
+      "skills": [
+        "beeper",
+        "notcrawl",
+        "obsidian",
+        "reminders",
+        "sonos",
+        "speaking",
+        "things-todo",
+        "twilio-sms",
+        "whatsapp"
+      ]
+    },
+    {
+      "title": "Infrastructure & Release",
+      "description": "Skills for domains, DNS, npm, Cloudflare, Wrangler, 1Password, SSH, releases, and remote machines.",
+      "skills": [
+        "clickclack",
+        "cloudflare-registrar",
+        "domain-dns-ops",
+        "mac-maintenance",
+        "npm",
+        "one-password",
+        "release-tweets",
+        "remote-mac",
+        "ssh-doctor",
+        "wrangler"
+      ]
+    }
+  ]
+}
