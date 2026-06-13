@@ -25,6 +25,7 @@
         "github-cache-hygiene",
         "github-deep-review",
         "github-project-triage",
+        "maintainer-orchestrator",
         "openclaw-relay"
       ]
     },
