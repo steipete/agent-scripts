@@ -18,6 +18,10 @@ jobs:
           cache: npm
           cache-dependency-path: skills/video-transcript-downloader/package-lock.json
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
       - name: Check shell helper syntax
         run: |
           find skills -path '*/scripts/*' -type f -print0 |
@@ -29,6 +33,12 @@ jobs:
 
       - name: Test ClawSweeper status helper
         run: skills/clawsweeper-status/scripts/clawsweeper-status.test.sh
+
+      - name: Build browser helper
+        run: |
+          bun install --frozen-lockfile
+          bun build scripts/browser-tools.ts --compile --target bun --outfile /tmp/browser-tools
+          /tmp/browser-tools --help
 
       - name: Install video transcript downloader dependencies
         working-directory: skills/video-transcript-downloader
