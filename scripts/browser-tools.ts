@@ -951,8 +951,8 @@ async function ensureReadability(page: any) {
     // ignore
   }
   const scripts = [
-    'https://unpkg.com/@mozilla/readability@0.4.4/Readability.js',
-    'https://unpkg.com/turndown@7.1.2/dist/turndown.js',
+    'https://unpkg.com/@mozilla/readability@0.6.0/Readability.js',
+    'https://unpkg.com/turndown@7.2.4/dist/turndown.js',
     'https://unpkg.com/turndown-plugin-gfm@1.0.2/dist/turndown-plugin-gfm.js',
   ];
   for (const src of scripts) {
