@@ -14,7 +14,9 @@ Snapshot: 2026-07-01. Metric: Peter-authored non-merge commits divided by author
 | [openclaw/clawscan](https://github.com/openclaw/clawscan) | 0 / 120 | Patrick Erichsen: 110; Vincent Koc: 10 |
 | [openclaw/clownfish](https://github.com/openclaw/clownfish) | 42 / 931 | Vincent Koc identities: 889 |
 | [openclaw/clawrouter](https://github.com/openclaw/clawrouter) | 28 / 248 | Vincent Koc identities: 220 |
+| [openclaw/clawdinators](https://github.com/openclaw/clawdinators) | 2 / 253 | Josh Palmer identities: 251; automation identities filtered |
 | [openclaw/crabbox](https://github.com/openclaw/crabbox) | 654 / 1,544 | Vincent Koc: 645; Peter is plurality, not majority |
+| [openclaw/crabline](https://github.com/openclaw/crabline) | 13 / 81 | Vincent Koc identities: 45; Dallin Romney: 23 |
 | [openclaw/crabpot](https://github.com/openclaw/crabpot) | 13 / 331 | Vincent Koc: 310 |
 | [openclaw/crawl-remote](https://github.com/openclaw/crawl-remote) | 5 / 18 | Vincent Koc: 12 |
 | [openclaw/crawlbar](https://github.com/openclaw/crawlbar) | 16 / 152 | Vincent Koc: 128 |
@@ -33,7 +35,10 @@ Snapshot: 2026-07-01. Metric: Peter-authored non-merge commits divided by author
 | [openclaw/plugin-inspector](https://github.com/openclaw/plugin-inspector) | 8 / 168 | Vincent Koc: 146 |
 | [openclaw/releases](https://github.com/openclaw/releases) | 6 / 20 | Vincent Koc identities: 13 |
 | [openclaw/rfcs](https://github.com/openclaw/rfcs) | 4 / 35 | Gio Della-Libera: 11 |
+| [openclaw/shellbench](https://github.com/openclaw/shellbench) | 3 / 120 | scoootscooob identities: 56; Codex: 26 |
 | [openclaw/slacrawl](https://github.com/openclaw/slacrawl) | 79 / 197 | Vincent Koc: 107 |
+| [steipete/iterm-mcp](https://github.com/steipete/iterm-mcp) | 2 / 67 | Ferris Lucas: 59 |
 | [steipete/nemoforge](https://github.com/steipete/nemoforge) | 3 / 146 | antirez: 102 |
+| [martian-engineering/lossless-claw](https://github.com/martian-engineering/lossless-claw) | 1 / 440 | Josh Lehman: 245; automation identities filtered |
 
 Standing separate-project exclusions remain [openclaw/openclaw](https://github.com/openclaw/openclaw) and [openclaw/clawhub](https://github.com/openclaw/clawhub), regardless of contribution share.
