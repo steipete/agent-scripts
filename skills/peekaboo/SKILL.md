@@ -13,6 +13,14 @@ Use for macOS screen capture, UI inspection, and GUI automation.
 - Else use `peekaboo`.
 - Check first: `~/bin/peekaboo --version || peekaboo --version`.
 
+## Mac app host
+
+- Launch `Peekaboo.app` before live capture/automation; the CLI does not auto-launch it.
+- The app owns TCC grants and serves `~/Library/Application Support/Peekaboo/bridge.sock`.
+- Installed app: `open -a Peekaboo`. Repo build: build the `Apps/Mac/Peekaboo.xcodeproj` `Peekaboo` scheme, then open the resulting `Peekaboo.app`.
+- `peekaboo daemon start` is not an app launch; the daemon has separate permissions and `daemon.sock`.
+- Verify `peekaboo bridge status --verbose --json --bridge-socket "$HOME/Library/Application Support/Peekaboo/bridge.sock"` selects `hostKind: gui`.
+
 ## Safety
 
 - Check permissions before capture/automation: `peekaboo permissions status --json`.
@@ -29,6 +37,8 @@ Use for macOS screen capture, UI inspection, and GUI automation.
 PB="${PEEKABOO_BIN:-$HOME/bin/peekaboo}"
 [ -x "$PB" ] || PB="$(command -v peekaboo)"
 
+open -a Peekaboo
+"$PB" bridge status --verbose --json --bridge-socket "$HOME/Library/Application Support/Peekaboo/bridge.sock"
 "$PB" permissions status --json
 "$PB" list screens --json
 "$PB" list apps --json
@@ -44,11 +54,12 @@ PB="${PEEKABOO_BIN:-$HOME/bin/peekaboo}"
 ## Workflow
 
 1. Resolve `PB` as above and confirm version when install state matters.
-2. Run `permissions status --json`; if missing TCC, report exact missing grant.
-3. For screenshots, use `image`; include `--path`, `--json`, and usually `--no-remote`.
-4. For element targeting, run `see --json --annotate`, then click by element id/snapshot.
-5. For long-running/change-aware screen capture, use `capture live`; for video frame sampling, use `capture video`.
-6. Use `tools --json` for command/tool discovery and `learn` when the full agent guide is useful.
-7. Verify output files with `sips -g pixelWidth -g pixelHeight <path>` or view the image.
+2. For live UI work, launch `Peekaboo.app`; verify the GUI bridge and its permissions.
+3. Run `permissions status --json`; if missing TCC, report exact missing grant.
+4. For screenshots, use `image`; include `--path`, `--json`, and usually `--no-remote` only when deliberately testing caller-local TCC.
+5. For element targeting, run `see --json --annotate`, then click by element id/snapshot.
+6. For long-running/change-aware screen capture, use `capture live`; for video frame sampling, use `capture video`.
+7. Use `tools --json` for command/tool discovery and `learn` when the full agent guide is useful.
+8. Verify output files with `sips -g pixelWidth -g pixelHeight <path>` or view the image.
 
 Docs: `~/Projects/Peekaboo/docs/commands/`.
