@@ -8,7 +8,8 @@
  * directly via the DevTools protocol without pulling in a large MCP server.
  */
 import { Command } from 'commander';
-import { execSync, spawn } from 'node:child_process';
+import { execFileSync, execSync, spawn } from 'node:child_process';
+import { cpSync, mkdirSync, rmSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -31,6 +32,12 @@ function browserURL(port: number): string {
 
 async function connectBrowser(port: number) {
   return puppeteer.connect({ browserURL: browserURL(port), defaultViewport: null });
+}
+
+function copyChromeProfile(sourceDir: string, profileDir: string): void {
+  rmSync(profileDir, { recursive: true, force: true });
+  mkdirSync(profileDir, { recursive: true });
+  cpSync(sourceDir, profileDir, { recursive: true, force: true });
 }
 
 async function getActivePage(port: number) {
@@ -70,16 +77,16 @@ program
 
     if (killExisting) {
       try {
-        execSync("killall 'Google Chrome'", { stdio: 'ignore' });
+        execFileSync('killall', ['Google Chrome'], { stdio: 'ignore' });
       } catch {
         // ignore missing processes
       }
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-    execSync(`mkdir -p "${profileDir}"`);
+    mkdirSync(profileDir, { recursive: true });
     if (profile) {
-      const source = `${path.join(os.homedir(), 'Library', 'Application Support', 'Google', 'Chrome')}/`;
-      execSync(`rsync -a --delete "${source}" "${profileDir}/"`, { stdio: 'ignore' });
+      const source = path.join(os.homedir(), 'Library', 'Application Support', 'Google', 'Chrome');
+      copyChromeProfile(source, profileDir);
     }
 
     spawn(chromePath, [`--remote-debugging-port=${port}`, `--user-data-dir=${profileDir}`, '--no-first-run', '--disable-popup-blocking'], {
@@ -416,14 +423,13 @@ program
   .option('--timeout <seconds>', 'Capture duration in seconds (default: 5 for one-shot, infinite for --follow)', (value) => Number.parseInt(value, 10))
   .option('--color', 'Force color output')
   .option('--no-color', 'Disable color output')
-  .option('--no-serialize', 'Disable object serialization (show raw text only)', false)
+  .option('--no-serialize', 'Disable object serialization (show raw text only)')
   .action(async (options) => {
     const port = options.port as number;
     const follow = options.follow as boolean;
     const timeout = options.timeout as number | undefined;
     const typesFilter = options.types as string | undefined;
-    const noSerialize = options.noSerialize as boolean;
-    const serialize = !noSerialize;
+    const serialize = options.serialize !== false;
 
     // Track explicit color flags by looking at argv to avoid Commander defaults overriding TTY detection.
     const argv = process.argv.slice(2);
