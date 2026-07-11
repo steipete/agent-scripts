@@ -9,7 +9,7 @@
  */
 import { Command } from 'commander';
 import { execFileSync, execSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -53,15 +53,36 @@ function pathsOverlap(first: string, second: string): boolean {
 }
 
 export function copyChromeProfile(sourceDir: string, profileDir: string): void {
-  const source = resolveComparablePath(sourceDir);
-  const destination = resolveComparablePath(profileDir);
+  const source = realpathSync(sourceDir);
+  if (!statSync(source).isDirectory()) {
+    throw new Error('Chrome profile source must be a directory');
+  }
+
+  let destinationLinkExists = false;
+  try {
+    destinationLinkExists = lstatSync(profileDir).isSymbolicLink();
+  } catch {
+    // Missing destinations are created below.
+  }
+  if (destinationLinkExists && !existsSync(profileDir)) {
+    throw new Error('Chrome profile destination symlink target does not exist');
+  }
+
+  let destination = resolveComparablePath(profileDir);
   if (pathsOverlap(source, destination) || pathsOverlap(destination, source)) {
     throw new Error('Chrome profile source and destination must not overlap');
   }
 
-  rmSync(profileDir, { recursive: true, force: true });
-  mkdirSync(profileDir, { recursive: true });
-  cpSync(source, profileDir, {
+  if (existsSync(profileDir) && statSync(profileDir).isDirectory()) {
+    for (const entry of readdirSync(destination)) {
+      rmSync(path.join(destination, entry), { recursive: true, force: true });
+    }
+  } else {
+    rmSync(profileDir, { recursive: true, force: true });
+    mkdirSync(profileDir, { recursive: true });
+    destination = resolveComparablePath(profileDir);
+  }
+  cpSync(source, destination, {
     recursive: true,
     force: true,
     verbatimSymlinks: true,
