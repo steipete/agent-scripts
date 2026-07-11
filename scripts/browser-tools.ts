@@ -61,7 +61,7 @@ export function copyChromeProfile(sourceDir: string, profileDir: string): void {
 
   rmSync(profileDir, { recursive: true, force: true });
   mkdirSync(profileDir, { recursive: true });
-  cpSync(sourceDir, profileDir, {
+  cpSync(source, profileDir, {
     recursive: true,
     force: true,
     verbatimSymlinks: true,
@@ -1198,6 +1198,22 @@ function fetchJson(url: string, timeoutMs = 2000): Promise<unknown> {
   });
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+export function isMainModule(
+  metaMain: boolean | null | undefined = import.meta.main,
+  argvPath: string | undefined = process.argv[1],
+  moduleUrl: string = import.meta.url,
+): boolean {
+  if (typeof metaMain === 'boolean') return metaMain;
+  if (!argvPath) return false;
+
+  const modulePath = fileURLToPath(moduleUrl);
+  try {
+    return realpathSync(argvPath) === realpathSync(modulePath);
+  } catch {
+    return path.resolve(argvPath) === modulePath;
+  }
+}
+
+if (isMainModule()) {
   void program.parseAsync(process.argv);
 }
