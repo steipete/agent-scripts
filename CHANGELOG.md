@@ -4,6 +4,9 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 # Changelog
 
+## 2026-07-11 — Browser Tools Hardening
+- Removed shell interpretation from browser profile setup, preserved relative symlinks while copying profiles, and fixed the `--no-serialize` console flag. Thanks @ShiroKSH.
+
 ## 2026-07-11 — xurl Install Discovery
 - Fixed the xurl skill's npm installer metadata so OpenClaw discovers the supported Node installation path. Thanks @not-stbenjam.
 

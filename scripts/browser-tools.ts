@@ -9,7 +9,7 @@
  */
 import { Command } from 'commander';
 import { execFileSync, execSync, spawn } from 'node:child_process';
-import { cpSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -18,6 +18,7 @@ import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { inspect } from 'node:util';
 import puppeteer, { type HTTPRequest } from 'puppeteer-core';
+import { copyChromeProfile } from './browser-tools-profile';
 
 /** Utility type so TypeScript knows the async function constructor */
 type AsyncFunctionCtor = new (...args: string[]) => (...fnArgs: unknown[]) => Promise<unknown>;
@@ -32,12 +33,6 @@ function browserURL(port: number): string {
 
 async function connectBrowser(port: number) {
   return puppeteer.connect({ browserURL: browserURL(port), defaultViewport: null });
-}
-
-function copyChromeProfile(sourceDir: string, profileDir: string): void {
-  rmSync(profileDir, { recursive: true, force: true });
-  mkdirSync(profileDir, { recursive: true });
-  cpSync(sourceDir, profileDir, { recursive: true, force: true });
 }
 
 async function getActivePage(port: number) {
