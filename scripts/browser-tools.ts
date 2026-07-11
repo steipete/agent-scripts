@@ -9,16 +9,16 @@
  */
 import { Command } from 'commander';
 import { execFileSync, execSync, spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 import puppeteer, { type HTTPRequest } from 'puppeteer-core';
-import { copyChromeProfile } from './browser-tools-profile';
 
 /** Utility type so TypeScript knows the async function constructor */
 type AsyncFunctionCtor = new (...args: string[]) => (...fnArgs: unknown[]) => Promise<unknown>;
@@ -33,6 +33,39 @@ function browserURL(port: number): string {
 
 async function connectBrowser(port: number) {
   return puppeteer.connect({ browserURL: browserURL(port), defaultViewport: null });
+}
+
+function resolveComparablePath(inputPath: string): string {
+  let existingPath = path.resolve(inputPath);
+  const missingSegments: string[] = [];
+  while (!existsSync(existingPath)) {
+    const parent = path.dirname(existingPath);
+    if (parent === existingPath) break;
+    missingSegments.unshift(path.basename(existingPath));
+    existingPath = parent;
+  }
+  return path.join(realpathSync(existingPath), ...missingSegments);
+}
+
+function pathsOverlap(first: string, second: string): boolean {
+  const relative = path.relative(first, second);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+export function copyChromeProfile(sourceDir: string, profileDir: string): void {
+  const source = resolveComparablePath(sourceDir);
+  const destination = resolveComparablePath(profileDir);
+  if (pathsOverlap(source, destination) || pathsOverlap(destination, source)) {
+    throw new Error('Chrome profile source and destination must not overlap');
+  }
+
+  rmSync(profileDir, { recursive: true, force: true });
+  mkdirSync(profileDir, { recursive: true });
+  cpSync(sourceDir, profileDir, {
+    recursive: true,
+    force: true,
+    verbatimSymlinks: true,
+  });
 }
 
 async function getActivePage(port: number) {
@@ -1165,4 +1198,6 @@ function fetchJson(url: string, timeoutMs = 2000): Promise<unknown> {
   });
 }
 
-program.parseAsync(process.argv);
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  void program.parseAsync(process.argv);
+}
