@@ -4,6 +4,9 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 # Changelog
 
+## 2026-07-11 — xurl Install Discovery
+- Fixed the xurl skill's npm installer metadata so OpenClaw discovers the supported Node installation path. Thanks @not-stbenjam.
+
 ## 2026-07-09 — ClawSweeper Worker Capacity
 - Made `clawsweeper-status` report actual Codex job utilization against configured capacity, exact-review queue and target occupancy, and workflow concurrency waiters separately from queued jobs.
 
