@@ -49,8 +49,8 @@ command codex exec --yolo -C <repo> \
 - Model default: `gpt-5.6-sol`, effort `high`, fast mode on — pin all three explicitly; don't rely on user config.
 - `--yolo` is the house default; Codex may run commands/tests freely. Keep prompts scoped to the target repo.
 - `command codex` bypasses any interactive shell alias. If codex isn't on PATH, it depends on how it was installed:
-  - node/standalone install: `fnm exec --using default -- codex` (a package-manager symlink or shim on PATH is fine — this caveat is only about the app bundle below).
-  - ChatGPT desktop app (Codex merged into it, July 2026): the CLI ships bundled at `/Applications/ChatGPT.app/Contents/Resources/codex` and shares the app's ChatGPT sign-in. Expose **that** binary with an **exec-wrapper, not a symlink** — it locates sibling helpers (e.g. `codex-code-mode-host`) relative to its own invocation path, so a symlink to it misresolves them and `exec` dies with `the workspace execution host is missing` (the agent runs, but every file edit fails). Non-destructive wrapper (won't clobber an existing launcher):
+  - node/standalone install: `fnm exec --using default -- codex`
+  - ChatGPT desktop app: the CLI ships bundled at `/Applications/ChatGPT.app/Contents/Resources/codex` and shares the app's ChatGPT sign-in. Expose **that** binary with an **exec-wrapper, not a symlink**
     ```sh
     mkdir -p ~/.local/bin
     [ -e ~/.local/bin/codex ] || { printf '#!/bin/sh\nexec "/Applications/ChatGPT.app/Contents/Resources/codex" "$@"\n' > ~/.local/bin/codex && chmod +x ~/.local/bin/codex; }
