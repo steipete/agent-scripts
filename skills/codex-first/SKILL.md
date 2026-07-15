@@ -48,9 +48,14 @@ command codex exec --yolo -C <repo> \
 
 - Model default: `gpt-5.6-sol`, effort `high`, fast mode on — pin all three explicitly; don't rely on user config.
 - `--yolo` is the house default; Codex may run commands/tests freely. Keep prompts scoped to the target repo.
-- `command codex` bypasses any interactive shell alias. Codex must resolve to a **real binary path, not a symlink** (see below). Two install shapes:
-  - node/standalone install: usually already on PATH; if not, `fnm exec --using default -- codex`.
-  - ChatGPT desktop app (Codex merged into it, July 2026): the binary ships at `/Applications/ChatGPT.app/Contents/Resources/codex` and shares the app's ChatGPT sign-in. Put it on PATH with an **exec-wrapper, never a symlink** — codex locates sibling helpers (e.g. `codex-code-mode-host`) relative to its invocation path, so a symlink misresolves them and `exec` dies with `the workspace execution host is missing` (agent runs, but every file edit fails). Wrapper: `printf '#!/bin/sh\nexec "/Applications/ChatGPT.app/Contents/Resources/codex" "$@"\n' > ~/.local/bin/codex && chmod +x ~/.local/bin/codex`. Or install the self-contained CLI via `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, which has no wrapper caveat.
+- `command codex` bypasses any interactive shell alias. If codex isn't on PATH, it depends on how it was installed:
+  - node/standalone install: `fnm exec --using default -- codex` (a package-manager symlink or shim on PATH is fine — this caveat is only about the app bundle below).
+  - ChatGPT desktop app (Codex merged into it, July 2026): the CLI ships bundled at `/Applications/ChatGPT.app/Contents/Resources/codex` and shares the app's ChatGPT sign-in. Expose **that** binary with an **exec-wrapper, not a symlink** — it locates sibling helpers (e.g. `codex-code-mode-host`) relative to its own invocation path, so a symlink to it misresolves them and `exec` dies with `the workspace execution host is missing` (the agent runs, but every file edit fails). Non-destructive wrapper (won't clobber an existing launcher):
+    ```sh
+    mkdir -p ~/.local/bin
+    [ -e ~/.local/bin/codex ] || { printf '#!/bin/sh\nexec "/Applications/ChatGPT.app/Contents/Resources/codex" "$@"\n' > ~/.local/bin/codex && chmod +x ~/.local/bin/codex; }
+    ```
+    Or install the self-contained CLI via `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, which needs no wrapper.
 - stderr suppressed (thinking noise bloats context); drop `2>/dev/null` only to debug a failing run
 - read `-o` file for the result; don't parse the JSONL stream
 - long runs: Bash run_in_background, read `-o` file on exit; don't kill quiet runs <30 min
