@@ -69,4 +69,4 @@ OCTOPOOL_NO_FALLBACK=1 gh api repos/owner/repo --jq .full_name
 
 ## Agent Etiquette
 
-Batch questions by repo and state. Reuse data already printed in the session. Back off CI polling; inspect logs only once for a failed run. Do not bypass the shim with `/opt/homebrew/opt/gh/bin/gh` unless diagnosing the shim itself.
+Batch questions by repo and state. Reuse data already printed in the session. Back off CI polling; inspect logs only once for a failed run. For reads, never bypass the shim with an absolute real-`gh` path such as `/opt/homebrew/bin/gh` or `/opt/homebrew/opt/gh/bin/gh` unless diagnosing the shim itself. Reserve `OPENCLAW_GH_BIN` and plain `gh` resolution for repo workflows that need mutations; keep ordinary reads on bare `gh`.

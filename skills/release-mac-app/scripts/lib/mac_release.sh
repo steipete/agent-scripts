@@ -84,13 +84,16 @@ mac_release_load_1password_env() {
   fi
 
   require_bin tmux op node
-  local account vault socket_dir socket session work_dir script runner env_file log_file status_file
+  local account vault socket_dir socket session op_window work_dir script runner env_file log_file status_file
   account=${MAC_RELEASE_OP_ACCOUNT:-my.1password.com}
   vault=${MAC_RELEASE_OP_VAULT:-}
   socket_dir=${CLAWDBOT_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/clawdbot-tmux-sockets}
   mkdir -p "$socket_dir"
-  socket=${MAC_RELEASE_OP_TMUX_SOCKET:-"$socket_dir/mac-release-op.sock"}
-  session=${MAC_RELEASE_OP_TMUX_SESSION:-mac-release-op}
+  # Shared op tmux server/session (see one-password skill): every op flow uses
+  # clawdbot-op.sock + op-work and its own window; extra sessions alert Peter.
+  socket=${MAC_RELEASE_OP_TMUX_SOCKET:-"$socket_dir/clawdbot-op.sock"}
+  session=${MAC_RELEASE_OP_TMUX_SESSION:-op-work}
+  op_window=
   work_dir=$(mktemp -d /tmp/mac-release-op.XXXXXX)
   script="$work_dir/read-op.sh"
   runner="$work_dir/run-in-tmux.sh"
@@ -102,6 +105,9 @@ mac_release_load_1password_env() {
   # shellcheck disable=SC2329 # invoked via traps while this function is active
   cleanup_1password_env() {
     [[ -z "${work_dir:-}" ]] || rm -rf "$work_dir"
+    # Kill only our task window; the op-work session stays for other flows.
+    [[ -z "${op_window:-}" ]] || tmux -S "$socket" kill-window -t "$op_window" 2>/dev/null || true
+    op_window=
   }
   restore_1password_traps() {
     if [[ -n "$old_exit_trap" ]]; then
@@ -241,9 +247,10 @@ SCRIPT
 
   tmux -S "$socket" has-session -t "$session" 2>/dev/null ||
     tmux -S "$socket" new-session -d -s "$session" -n shell
+  op_window=$(tmux -S "$socket" new-window -d -t "$session" -n mac-release -P -F '#{window_id}')
 
   : >"$log_file"
-  tmux -S "$socket" send-keys -t "$session:" -- \
+  tmux -S "$socket" send-keys -t "$op_window" -- \
     "bash $(mac_release_tmux_quote "$runner"); printf '%s\n' \$? > $(mac_release_tmux_quote "$status_file")" C-m
 
   local deadline=$((SECONDS + ${MAC_RELEASE_OP_WAIT_SECONDS:-300}))
@@ -251,7 +258,7 @@ SCRIPT
     [[ "$SECONDS" -lt "$deadline" ]] || {
       sed -n '1,80p' "$log_file" >&2 || true
       cleanup_1password_env
-      mac_release_die "Timed out waiting for 1Password fields in tmux session $session"
+      mac_release_die "Timed out waiting for 1Password fields in op tmux session $session"
     }
     sleep 1
   done
@@ -261,7 +268,7 @@ SCRIPT
   if [[ "$rc" != "0" ]]; then
     sed -n '1,120p' "$log_file" >&2 || true
     cleanup_1password_env
-    mac_release_die "1Password field export failed in tmux session $session"
+    mac_release_die "1Password field export failed in op tmux session $session"
   fi
 
   # shellcheck source=/dev/null
@@ -290,6 +297,7 @@ SCRIPT
 mac_release_version_from_zip() {
   local zip_name=${1##*/} zip_base
   zip_base=${zip_name%.zip}
+  zip_base=${zip_base%.app}
   if [[ "$zip_base" =~ ([0-9]+([.][0-9]+){1,2}([-.][0-9A-Za-z.]+)?)$ ]]; then
     printf '%s\n' "${BASH_REMATCH[1]}"
   else
@@ -644,9 +652,11 @@ if not first:
 header = first.group(1)
 if "Unreleased" in header:
     raise SystemExit("Top changelog section still marked Unreleased")
-if not (header.startswith(f"{version} ") or header.startswith(f"{version} -") or header.startswith(f"{version} —")):
+version_token = rf"(?:{re.escape(version)}|\[{re.escape(version)}\])"
+version_header = re.compile(rf"^{version_token}(?:\s+.*)?$")
+if not version_header.fullmatch(header):
     raise SystemExit(f"Top changelog section '{header}' does not match version {version}")
-if not re.search(rf"^##\s+{re.escape(version)}(\s|$)", text, re.M):
+if not re.search(rf"^##\s+{version_token}(?:\s|$)", text, re.M):
     raise SystemExit(f"No section found for version {version}")
 PY
 }
@@ -1509,7 +1519,7 @@ mac_release_release() {
   elif [[ "${MAC_RELEASE_TAG_ANNOTATED:-1}" == "1" ]]; then
     git tag ${tag_args[@]+"${tag_args[@]}"} -m "${APP_NAME} ${MARKETING_VERSION}" "$TAG"
   else
-    git tag ${tag_args[@]+"${tag_args[@]}"} "$TAG"
+    git tag --no-sign ${tag_args[@]+"${tag_args[@]}"} "$TAG"
   fi
   tag_created=1
   git push ${push_tag_args[@]+"${push_tag_args[@]}"} origin "$TAG"

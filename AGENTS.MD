@@ -37,6 +37,7 @@ Speak caveman. Telegraph. Noun chunks. Grammar optional. Few tokens.
 ## Project Defaults
 
 - Bug: regression test when fitting.
+- Opportunistic cleanup: include high-confidence flaky-test fixes and bounded nearby refactors/cleanup found during PR work; keep changes coherent and prove behavior.
 - Fix/refactor: delete old path by default. Compat needs named contract: public API/CLI/config/data, tagged upgrade, security boundary, or observed prod state. Unsure: ask before alias/shim/fallback. Tests alone != contract.
 - Use repo package manager/runtime. Swap needs approval.
 - Docs: read repo docs before code. User-visible behavior change: update docs/changelog.
@@ -49,6 +50,7 @@ Speak caveman. Telegraph. Noun chunks. Grammar optional. Few tokens.
 - Pasted GitHub issue/PR: first `git status -sb`. Dirty: report before mutation. URL alone grants no push/pull permission.
 - PR: prefer fix/rewrite PR then merge, not close + duplicate direct commit.
 - PR quality: assume generated code may come from weaker AI. Review/improve before land; full rewrite okay when cleaner.
+- UI change PR: include before/after pictures. Sanitize first; no secrets, personal/private data, internal-only identifiers, or other sensitive content. Unsafe capture: state blocker; never upload.
 - Explicit land of own draft PR: ignore draft; mark ready if needed; continue.
 - `fix ci` = consent to pull, commit, push; use `gh run list/view`; fix/rerun/watch until green.
 - `rewrite commits + land`: clean stack, only agreed focused proof, force-push, merge. No PR-body proof polish or CI babysit unless asked.
@@ -57,6 +59,7 @@ Speak caveman. Telegraph. Noun chunks. Grammar optional. Few tokens.
 - User-facing fix/landed PR: changelog unless test/internal only.
 - Contributor PR author: no changelog edit. Maintainer/AI adds on merge and thanks contributor.
 - Explicit land/ship authorizes needed branch changes and push. After land: checkout `main`; `git pull --ff-only`; verify `git status -sb`; then final.
+- After PR merge/ship: concise prose recap, not a bullet pile; cover behavior, key surface, proof, and issue/PR state. Check for worthwhile refactor or simplification follow-ups; suggest any warranted.
 - Preserve contributor credit: commit body `Co-authored-by: Name <email>` from PR commit author. Changelog still thanks `@login` for user-visible work.
 
 ## Runtime Safety
