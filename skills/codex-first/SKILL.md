@@ -57,7 +57,7 @@ command codex exec --yolo -C <repo> \
 - `--yolo` is the house default; Codex may run commands/tests freely. Keep prompts scoped to the target repo.
 - `command codex` bypasses any interactive shell alias. If codex isn't on PATH, it depends on how it was installed:
   - node/standalone install: `fnm exec --using default -- codex`
-  - ChatGPT desktop app: the CLI ships bundled at `/Applications/ChatGPT.app/Contents/Resources/codex` and shares the app's ChatGPT sign-in. Expose **that** binary with an **exec-wrapper, not a symlink**. Ensure `~/.local/bin` stays on PATH (for zsh, persist the export in `~/.zshrc`), then:
+  - ChatGPT desktop app: the CLI ships bundled at `/Applications/ChatGPT.app/Contents/Resources/codex`. Expose **that** binary with an **exec-wrapper, not a symlink**. Ensure `~/.local/bin` stays on PATH (for zsh, persist the export in `~/.zshrc`), then:
     ```sh
     mkdir -p "$HOME/.local/bin"
     export PATH="$HOME/.local/bin:$PATH"
