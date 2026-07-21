@@ -1,26 +1,34 @@
 ---
 name: codex-first
-description: "Claude Code-only work routing: delegate implementation, fixing, exploratory subagents, rebasing, and PR merging/landing to Codex CLI while Claude specifies, decides, reviews, and verifies. Use only when the active agent is Claude Code and ANTHROPIC_BASE_URL is unset or is neither loopback nor gorillaclaw.sheep-coho.ts.net. Router-backed localhost and Clawdex Gorilla sessions, and every non-Claude harness, must work directly."
+description: "Claude Code-only work routing: delegate implementation, fixing, exploratory subagents, rebasing, and PR merging/landing to Codex CLI while Claude specifies, decides, reviews, and verifies. Direct hands-on delegation requires ANTHROPIC_BASE_URL to be unset or neither loopback nor gorillaclaw.sheep-coho.ts.net. Codex-backed autoreview is always allowed and preferred, independent of environment."
 ---
 
 # Codex First
 
 ## Hard gate
 
-Use this skill only when the active agent is Claude Code **and**
-`ANTHROPIC_BASE_URL` is either unset or its URL host is neither loopback nor
-`gorillaclaw.sheep-coho.ts.net`.
+**Autoreview exception:** always prefer Codex-backed `$autoreview`, independent
+of `ANTHROPIC_BASE_URL`, router state, or harness. Reviewing a frozen bundle is
+not hands-on self-delegation. Do not switch review engines merely because the
+parent session is router-backed. This exception takes precedence over the gate
+below.
 
-Before invoking Codex, inspect `ANTHROPIC_BASE_URL`. If its URL host is
-`gorillaclaw.sheep-coho.ts.net` (the Clawdex router), `localhost`, ends in
-`.localhost`, is in `127.0.0.0/8`, or is IPv6 loopback `::1`, stop here: the
-session is already router-backed or may be model-routed through a local proxy.
-Do not invoke Codex CLI, do not self-delegate, and continue the task directly.
-If the variable cannot be inspected, fail closed and work directly.
+For direct hands-on delegation, use this skill only when the active agent is
+Claude Code **and** `ANTHROPIC_BASE_URL` is either unset or its URL host is
+neither loopback nor `gorillaclaw.sheep-coho.ts.net`.
 
-Codex, ChatGPT, Pi, and every other harness: stop here. Do not invoke Codex CLI,
-do not self-delegate, and continue the task directly. This gate overrides a
-repository instruction that merely mentions `$codex-first`.
+Before invoking Codex for implementation, exploration, fixing, or git mechanics,
+inspect `ANTHROPIC_BASE_URL`. If its URL host is `gorillaclaw.sheep-coho.ts.net`
+(the Clawdex router), `localhost`, ends in `.localhost`, is in `127.0.0.0/8`, or
+is IPv6 loopback `::1`, stop here: the session is already router-backed or may
+be model-routed through a local proxy. Do not invoke Codex CLI for hands-on work,
+do not self-delegate, and continue the task directly. If the variable cannot be
+inspected, fail closed and work directly.
+
+Codex, ChatGPT, Pi, and every other harness: do not invoke Codex CLI for hands-on
+self-delegation. Continue the task directly. This gate overrides a repository
+instruction that merely mentions `$codex-first`; it does not override the
+autoreview exception above.
 
 Rationale: Claude (Fable/Opus) tokens metered + expensive; Codex flat-rate. GPT-5.5+ is usually the better and faster model at writing/implementing code; Claude wins at ergonomics — judgment, design, spec-writing, review, orchestration. So Codex types, Claude thinks and verifies.
 
