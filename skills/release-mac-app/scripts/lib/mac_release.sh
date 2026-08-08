@@ -104,6 +104,7 @@ mac_release_load_1password_env() {
 
   require_bin tmux op node
   local account vault socket_dir socket session op_window work_dir script runner env_file log_file status_file
+  local service_account_token_file needs_service_account=0
   account=${MAC_RELEASE_OP_ACCOUNT:-my.1password.com}
   vault=${MAC_RELEASE_OP_VAULT:-}
   socket_dir=${CLAWDBOT_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/clawdbot-tmux-sockets}
@@ -140,10 +141,30 @@ mac_release_load_1password_env() {
   trap 'cleanup_1password_env; exit 130' INT
   trap 'cleanup_1password_env; exit 143' TERM
 
+  if [[ "$primary_missing" == "1" && "${MAC_RELEASE_OP_USE_SERVICE_ACCOUNT:-0}" == "1" ]]; then
+    needs_service_account=1
+  fi
+  if [[ "$codesign_missing" == "1" && "${MAC_RELEASE_CODESIGN_OP_USE_SERVICE_ACCOUNT-${MAC_RELEASE_OP_USE_SERVICE_ACCOUNT:-0}}" == "1" ]]; then
+    needs_service_account=1
+  fi
+  if [[ "$env_refs_missing" == "1" && "${MAC_RELEASE_OP_USE_SERVICE_ACCOUNT:-0}" == "1" ]]; then
+    needs_service_account=1
+  fi
+  service_account_token_file=
+  if [[ "$needs_service_account" == "1" ]]; then
+    [[ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]] || {
+      cleanup_1password_env
+      restore_1password_traps
+      mac_release_die "OP_SERVICE_ACCOUNT_TOKEN is required for 1Password service-account reads"
+    }
+    service_account_token_file="$work_dir/service-account-token"
+    (umask 077; printf '%s' "$OP_SERVICE_ACCOUNT_TOKEN" >"$service_account_token_file")
+  fi
+
   cat >"$script" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
-set +x
+set +vx
 
 item=${MAC_RELEASE_OP_ITEM:-}
 account=${MAC_RELEASE_OP_ACCOUNT:-my.1password.com}
@@ -163,18 +184,31 @@ work_dir=$(mktemp -d /tmp/mac-release-op-json.XXXXXX)
 trap 'rm -rf "$work_dir"' EXIT
 : >"$env_file"
 
+run_op() {
+  local use_service_account=$1 target_account=$2
+  shift 2
+  if [[ "$use_service_account" == "1" ]]; then
+    OP_LOAD_DESKTOP_APP_SETTINGS=false \
+      OP_BIOMETRIC_UNLOCK_ENABLED=false \
+      OP_SERVICE_ACCOUNT_TOKEN="${OP_SERVICE_ACCOUNT_TOKEN:?}" \
+      op "$@" </dev/null
+  else
+    env -u OP_SERVICE_ACCOUNT_TOKEN \
+      -u MOLTY_OP_SERVICE_ACCOUNT_TOKEN \
+      -u OP_LOAD_DESKTOP_APP_SETTINGS \
+      -u OP_BIOMETRIC_UNLOCK_ENABLED \
+      op "$@" --account "$target_account"
+  fi
+}
+
 read_item() {
   local target_item=$1 target_account=$2 target_vault=$3 use_service_account=$4 output=$5
-  local args=(item get "$target_item" --account "$target_account" --format json)
+  local args=(item get "$target_item" --format json)
   if [[ -n "$target_vault" ]]; then
     args+=(--vault "$target_vault")
   fi
 
-  if [[ -n "$target_vault" || "$use_service_account" == "1" ]]; then
-    op "${args[@]}" >"$output" 2>>"$log_file"
-  else
-    env -u OP_SERVICE_ACCOUNT_TOKEN -u MOLTY_OP_SERVICE_ACCOUNT_TOKEN op "${args[@]}" >"$output" 2>>"$log_file"
-  fi
+  run_op "$use_service_account" "$target_account" "${args[@]}" >"$output" 2>>"$log_file"
 }
 
 if [[ "$read_primary" == "1" ]]; then
@@ -236,16 +270,16 @@ NODE
 fi
 
 if [[ "${MAC_RELEASE_OP_ENV_REFS_READ:-0}" == "1" && -n "${MAC_RELEASE_OP_ENV_REFS:-}" ]]; then
-  while IFS= read -r env_ref_entry; do
+  while IFS= read -r env_ref_entry <&3; do
     [[ -n "${env_ref_entry// /}" ]] || continue
     env_ref_name=${env_ref_entry%%=*}
     env_ref_uri=${env_ref_entry#*=}
-    env_ref_value=$(op read "$env_ref_uri" 2>>"$log_file") ||
+    env_ref_value=$(run_op "${MAC_RELEASE_OP_USE_SERVICE_ACCOUNT:-0}" "$account" read "$env_ref_uri" 2>>"$log_file") ||
       { echo "op read failed for $env_ref_name" >&2; exit 1; }
     [[ -n "$env_ref_value" ]] || { echo "empty 1Password value for $env_ref_name" >&2; exit 1; }
     printf "export %s='%s'\n" "$env_ref_name" "${env_ref_value//\'/\'\\\'\'}" >>"$env_file"
     echo "$env_ref_name: len=${#env_ref_value}" >&2
-  done < <(tr ';' '\n' <<<"${MAC_RELEASE_OP_ENV_REFS}")
+  done 3< <(tr ';' '\n' <<<"${MAC_RELEASE_OP_ENV_REFS}")
 fi
 
 chmod 600 "$env_file"
@@ -255,6 +289,7 @@ SCRIPT
 
   {
     printf '#!/usr/bin/env bash\n'
+    printf 'set +vx\n'
     printf 'set -euo pipefail\n'
     printf 'export PATH=%q\n' "$PATH"
     printf 'export MAC_RELEASE_OP_ITEM=%q\n' "${MAC_RELEASE_OP_ITEM:-}"
@@ -275,6 +310,15 @@ SCRIPT
     printf 'export MAC_RELEASE_OP_ENV_REFS_READ=%q\n' "$env_refs_missing"
     printf 'export MAC_RELEASE_OP_ENV_FILE=%q\n' "$env_file"
     printf 'export MAC_RELEASE_OP_LOG_FILE=%q\n' "$log_file"
+    printf 'export MAC_RELEASE_OP_SERVICE_ACCOUNT_TOKEN_FILE=%q\n' "$service_account_token_file"
+    cat <<'RUNNER'
+if [[ -n "$MAC_RELEASE_OP_SERVICE_ACCOUNT_TOKEN_FILE" ]]; then
+  OP_SERVICE_ACCOUNT_TOKEN=$(<"$MAC_RELEASE_OP_SERVICE_ACCOUNT_TOKEN_FILE")
+  rm -f "$MAC_RELEASE_OP_SERVICE_ACCOUNT_TOKEN_FILE"
+  [[ -n "$OP_SERVICE_ACCOUNT_TOKEN" ]] || { echo "empty 1Password service-account token" >&2; exit 1; }
+  export OP_SERVICE_ACCOUNT_TOKEN
+fi
+RUNNER
     printf 'bash %q\n' "$script"
   } >"$runner"
   chmod 700 "$runner"
@@ -285,7 +329,7 @@ SCRIPT
 
   : >"$log_file"
   tmux -S "$socket" send-keys -t "$op_window" -- \
-    "bash $(mac_release_tmux_quote "$runner"); printf '%s\n' \$? > $(mac_release_tmux_quote "$status_file")" C-m
+    "env -u BASH_ENV bash $(mac_release_tmux_quote "$runner"); printf '%s\n' \$? > $(mac_release_tmux_quote "$status_file")" C-m
 
   local deadline=$((SECONDS + ${MAC_RELEASE_OP_WAIT_SECONDS:-300}))
   until [[ -f "$status_file" ]]; do
