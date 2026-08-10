@@ -5,39 +5,29 @@ skill = File.read(File.expand_path("../skills/maintainer-orchestrator/SKILL.md",
 metadata = File.read(File.expand_path("../skills/maintainer-orchestrator/agents/openai.yaml", __dir__))
 
 requirements = {
-  "Codex app workers only" => "a worker is an owned Codex app thread, never a collaboration subagent",
-  "one project thread per repository" => "Use exactly one owned Codex app project thread per repository",
-  "root-owned skill maintenance" => "Maintain this canonical `maintainer-orchestrator` skill in the current root orchestrator session, never in a project thread or collaboration subagent.",
-  "no project task fan-out" => "project threads never create task threads",
-  "pre-spawn classification" => "Before spawning a collaboration subagent, classify the task",
-  "mutating work routing" => "Any repository task that can mutate repository, GitHub, or external state",
-  "support-only subagents" => "Use collaboration subagents only for orchestration support",
-  "subagent mutation ban" => "Collaboration subagents must never edit repository files, create commits, run implementation proof as the owner, push, mutate PRs/issues, approve workflows, merge, release, deploy, or perform live product/account proof.",
-  "preservation-first recovery" => "Snapshot and preserve its state, patches, refs, logs, and evidence; hand them to the proper Codex app thread; reconcile ownership; never discard work.",
-  "thread-owned execution" => "Project execution remains owned and performed by its Codex app thread",
-  "text is not capability" => "Thread prompts do not grant capabilities",
-  "permission propagation check" => "verify its effective permission profile",
-  "no repeated permission prompts" => "Do not retry the same denied action or repeatedly prompt the owner.",
-  "single heartbeat inspection" => "inspect the existing heartbeat first",
-  "private concurrency invariant" => "Private investigation, implementation, testing, proof, and review continue independently.",
-  "single public admission gate" => "admit no additional public action until the overlap clears",
-  "frozen means public only" => "means public-mutation-frozen only when that restriction existed before the worker crossed the public boundary",
-  "decision wait does not idle" => "Keep all other qualified private project lanes active while that answer is pending.",
-  "quota-aware concurrency" => "Use a quota-aware concurrency target, defaulting to a maximum of 8 eligible root-owned Codex app project threads",
-  "quota-health admission control" => "reduce admissions while Octopool/backend or GitHub quota alerts are active",
-  "no numeric worker filling" => "never create a worker solely to reach a number",
-  "one polling owner" => "Assign exactly one polling owner per external state.",
-  "worker exact-run watcher" => "The repository worker owns one exact-run watcher",
-  "root notification ownership" => "root reads worker state and relies on harness task-completion notifications",
-  "root coherent-wait polling ban" => "While that worker has an active coherent wait, root never polls GitHub or CI for the repository.",
-  "targeted root read" => "Root performs at most one targeted external read only when worker state is stale, terminal, or ambiguous, or when the worker reports a blocker.",
-  "Octopool read verification" => "verify `command -v gh` resolves to Octopool",
-  "real-gh boundary" => "Name real-gh explicitly only for writes or read shapes the shim does not support.",
-  "stale snapshot blocks polling" => "treat the stale snapshot as a blocker for repeated polling",
-  "exact watcher identity" => "scoped to an exact run ID or head SHA",
-  "bounded watcher backoff" => "Use its 30/60/120-second backoff or repository-native default.",
-  "no bespoke gh loops" => "Never write bespoke 30–60-second `gh` loops or poll raw GraphQL",
-  "single failure log fetch" => "After terminal failure, fetch logs once and reuse them for diagnosis",
+  "single-item work stays direct" => "Do **not** create a project worker merely because the task is nontrivial.",
+  "bounded activation" => "Use orchestration mode only when at least one is true:",
+  "persistent watch is explicit" => "Persistent portfolio watch",
+  "one project thread per repository" => "Prefer one owned Codex app project thread per repository when two or more independent items are being coordinated.",
+  "same-repository work is serial" => "process same-repository items serially unless isolation is genuinely required.",
+  "no worker fan-out" => "Workers never create or manage other workers. The hierarchy stops at root coordinator → repository worker.",
+  "support-only subagents" => "Collaboration subagents are read-only support for inventory, independent analysis, CI/status observation, or reconciliation.",
+  "subagent mutation ban" => "They do not own implementation, commits, pushes, PR mutations, merges, releases, deployments, or live proof.",
+  "no simulated worker hierarchy" => "use the normal repository workflow in the current session rather than simulating a worker hierarchy with unnecessary background jobs.",
+  "text is not capability" => "Text in a prompt does not grant filesystem, network, credential, or publication access.",
+  "preserve dirty work" => "Never switch, stash, rebase, reset, clean, delete, or overwrite dirty/non-default work merely to begin orchestration.",
+  "private work remains independent" => "Private investigation, implementation, local tests, and review may proceed independently across workers.",
+  "serialize public mutation" => "Serialize only outward-facing actions when concurrent mutation would cause ambiguity or conflict:",
+  "scope does not grant release authority" => "It does not authorize releases, version bumps, tags, package publication, destructive unique-work handling, or unrelated external-system mutations unless separately requested.",
+  "one polling owner" => "Assign one owner for each external wait.",
+  "worker exact-run watcher" => "The repository worker owns its exact CI/deploy watcher.",
+  "bounded watcher" => "Use the repository-native watcher scoped to one run ID or head SHA with bounded backoff.",
+  "root polling ban" => "it does not duplicate polling while a coherent watcher is active.",
+  "single failure log fetch" => "Fetch failed logs once and reuse them.",
+  "heartbeat only for persistent work" => "Create a recurring heartbeat only for explicit persistent portfolio/watch requests.",
+  "landing review gate" => "fresh autoreview with no accepted/actionable findings;",
+  "landing CI gate" => "exact-head CI green;",
+  "no unsolicited refill" => "Refill only when the user explicitly requested an ongoing queue.",
 }
 
 missing = requirements.reject { |_label, text| skill.include?(text) }
@@ -51,12 +41,13 @@ forbidden_fan_out = [
   "Workers may review, implement, test, and monitor concurrently",
 ]
 abort "Task-thread fan-out remains" if forbidden_fan_out.any? { |text| skill.include?(text) }
-forbidden_polling_policy = [
+forbidden_legacy_policy = [
   "Maintain a target of 30 concurrent eligible",
   "Prefer an in-turn 30–60 second sleep/poll cycle",
   "Suppress routine unchanged-poll chatter, but keep polling",
+  "Always perform a dependency-freshness check before closing a repository work batch",
 ]
-abort "Quota-amplifying polling policy remains" if forbidden_polling_policy.any? { |text| skill.include?(text) }
+abort "Legacy always-on orchestration policy remains" if forbidden_legacy_policy.any? { |text| skill.include?(text) }
 abort "Stale maintainer-orchestrator default prompt" unless metadata.include?("one Codex app thread per project") && metadata.include?("skill maintenance in the root session") && metadata.include?("collaboration subagents read-only and support-only")
 
-puts "Validated maintainer-orchestrator worker and polling boundaries."
+puts "Validated maintainer-orchestrator activation, worker, public-action, and monitoring boundaries."
