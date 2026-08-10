@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "youtube-transcript-plus": "^2.0.0"
+    "youtube-transcript-plus": "^2.0.1"
   }
 }
