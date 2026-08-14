@@ -65,7 +65,8 @@ Common optional:
   helper resolves it inside the shared `op-work` tmux session, writes only a mode-0600 temporary key file, validates
   its public key against `SUPublicEDKey`, and removes it on success or failure.
 - `MAC_RELEASE_SPARKLE_OP_ACCOUNT` and `MAC_RELEASE_SPARKLE_OP_USE_SERVICE_ACCOUNT` override the primary 1Password
-  account/service-account mode for the Sparkle reference. Molty refs should set service-account mode to `1`.
+  account/service-account mode for the Sparkle reference. Service-account-backed refs should set service-account mode
+  to `1`.
 - `MAC_RELEASE_SIGNING_KEY_FILE` (local fallback path only; Keychain is used when the file is absent)
 - `MAC_RELEASE_EXTRA_ASSET_PATTERNS`
 - `MAC_RELEASE_EXTRA_ASSET_WAIT_SECONDS`

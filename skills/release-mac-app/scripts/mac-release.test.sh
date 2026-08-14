@@ -120,7 +120,7 @@ printf '\n' >>"$MAC_RELEASE_TEST_ROOT/op.log"
 if [[ "$1 $2" == "item get" ]]; then
   printf '%s\n' '{"fields":[{"label":"TEST_SECRET","value":"loaded-value"},{"label":"keychain_path","value":"/tmp/release.keychain-db"},{"label":"keychain_password","value":"password-value"}]}'
 elif [[ "$1" == "read" ]]; then
-  if [[ "$2" == "op://Molty/Peekaboo Sparkle EdDSA/private key" ]]; then
+  if [[ "$2" == "op://Release/Test Sparkle Key/private key" ]]; then
     printf '%s\n' "${MAC_RELEASE_TEST_SPARKLE_KEY:?}"
   else
     printf '%s\n' 'ref-value'
@@ -172,7 +172,7 @@ service_output="$test_root/service.output"
   export MAC_RELEASE_OP_USE_SERVICE_ACCOUNT=1
   export MAC_RELEASE_OP_VAULT=Molty
   export MAC_RELEASE_OP_ENV_REFS='EXTRA_SECRET=op://Molty/Release credentials/extra'
-  export MAC_RELEASE_SPARKLE_OP_REF='op://Molty/Peekaboo Sparkle EdDSA/private key'
+  export MAC_RELEASE_SPARKLE_OP_REF='op://Release/Test Sparkle Key/private key'
   export MAC_RELEASE_SPARKLE_OP_USE_SERVICE_ACCOUNT=1
   export MAC_RELEASE_CODESIGN_OP_ITEM='Signing keychain'
   unset MAC_RELEASE_CODESIGN_OP_VAULT

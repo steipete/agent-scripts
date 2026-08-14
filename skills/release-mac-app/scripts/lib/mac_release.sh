@@ -717,7 +717,8 @@ mac_release_sparkle_key_status() (
   label_source=$source
   resolved_temp=${_MAC_RELEASE_OWNED_SPARKLE_RAW_FILE:-}
   if [[ -z "$requested_source" && -n "$resolved_temp" ]]; then
-    label_source="1Password reference ${MAC_RELEASE_SPARKLE_OP_REF}"
+    # Report the credential source without echoing private vault/item inventory.
+    label_source="configured 1Password Sparkle key"
   fi
   if [[ "$source" != "keychain" ]]; then
     source=$(mac_release_expand "$source")
