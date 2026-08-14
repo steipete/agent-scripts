@@ -14,7 +14,8 @@ Use for BlackBar, RepoBar, CodexBar, Trimmy, and similar Sparkle-updated macOS a
 - Use `scripts/mac-release` from this skill for shared release/appcast/verify work.
 - Keep app-specific build/package/sign behavior in repo scripts unless it is already manifest-driven.
 - Never print private key material.
-- Prefer Keychain Sparkle signing. `SPARKLE_PRIVATE_KEY_FILE` is an explicit override only.
+- Prefer `MAC_RELEASE_SPARKLE_OP_REF` for headless release signing when the key is in 1Password; otherwise prefer
+  Keychain Sparkle signing. `SPARKLE_PRIVATE_KEY_FILE` is an explicit local override only.
 
 ## Commands
 
@@ -60,6 +61,11 @@ Common optional:
 - `MAC_RELEASE_SPARKLE_CHANNEL`
 - `MAC_RELEASE_GENERATE_APPCAST_ARGS`
 - `MAC_RELEASE_RUN_SPARKLE_UPDATE_TEST`
+- `MAC_RELEASE_SPARKLE_OP_REF` — exact `op://Vault/Item/field` reference for the Sparkle EdDSA private key. The
+  helper resolves it inside the shared `op-work` tmux session, writes only a mode-0600 temporary key file, validates
+  its public key against `SUPublicEDKey`, and removes it on success or failure.
+- `MAC_RELEASE_SPARKLE_OP_ACCOUNT` and `MAC_RELEASE_SPARKLE_OP_USE_SERVICE_ACCOUNT` override the primary 1Password
+  account/service-account mode for the Sparkle reference. Molty refs should set service-account mode to `1`.
 - `MAC_RELEASE_SIGNING_KEY_FILE` (local fallback path only; Keychain is used when the file is absent)
 - `MAC_RELEASE_EXTRA_ASSET_PATTERNS`
 - `MAC_RELEASE_EXTRA_ASSET_WAIT_SECONDS`
@@ -75,6 +81,8 @@ Common optional:
 
 - Prefer already-exported env vars first; no `op` call if all `MAC_RELEASE_OP_FIELDS` are present.
 - If fields are missing, read configured package and codesign items in one tmux command for the whole release.
+- Resolve `MAC_RELEASE_SPARKLE_OP_REF` without exposing the private key in the generated environment file or logs;
+  only the temporary file path crosses the helper boundary.
 - Use service-account mode only with an explicit vault or `MAC_RELEASE_OP_USE_SERVICE_ACCOUNT=1`.
 - Do not retry `op` reads in a fresh shell; rerun only from the same tmux session after explicit user direction.
 - Never allow a release to reach app packaging with an unprepared Developer ID keychain. No SecurityAgent password windows during release; fail the signing canary first.

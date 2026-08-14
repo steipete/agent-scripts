@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+# Temp-key ownership is intentionally process-local. Never inherit or export it:
+# child release helpers may use the key path but must not delete their parent's file.
+unset _MAC_RELEASE_OWNED_SPARKLE_RAW_FILE _MAC_RELEASE_OWNED_SPARKLE_CLEAN_FILE
+_MAC_RELEASE_OWNED_SPARKLE_RAW_FILE=
+_MAC_RELEASE_OWNED_SPARKLE_CLEAN_FILE=
+
 mac_release_die() {
   echo "ERROR: $*" >&2
   exit 1
@@ -50,9 +56,9 @@ mac_release_tmux_quote() {
 mac_release_load_1password_env() {
   set +vx
   local mode=${1:-all} codesign_passwordless=${MAC_RELEASE_CODESIGN_PASSWORDLESS:-0}
-  local primary_missing=0 codesign_missing=0 env_refs_missing=0 release_op_field
+  local primary_missing=0 codesign_missing=0 env_refs_missing=0 sparkle_missing=0 release_op_field
   local env_ref_entry env_ref_name
-  [[ "$mode" == "all" || "$mode" == "codesign-only" ]] ||
+  [[ "$mode" == "all" || "$mode" == "codesign-only" || "$mode" == "sparkle-only" ]] ||
     mac_release_die "Unknown 1Password load mode: $mode"
   if [[ "$codesign_passwordless" == "1" ]]; then
     unset MAC_RELEASE_CODESIGN_KEYCHAIN_PASSWORD
@@ -65,7 +71,7 @@ mac_release_load_1password_env() {
       [[ -n "${!release_op_field:-}" ]] || primary_missing=1
     done
   fi
-  if [[ -n "${MAC_RELEASE_CODESIGN_OP_ITEM:-}" ]]; then
+  if [[ "$mode" != "sparkle-only" && -n "${MAC_RELEASE_CODESIGN_OP_ITEM:-}" ]]; then
     [[ -n "${MAC_RELEASE_CODESIGN_KEYCHAIN:-}" ]] || codesign_missing=1
     if [[ "$codesign_passwordless" != "1" ]]; then
       [[ -n "${MAC_RELEASE_CODESIGN_KEYCHAIN_PASSWORD:-}" ]] || codesign_missing=1
@@ -84,7 +90,14 @@ mac_release_load_1password_env() {
       [[ -n "${!env_ref_name:-}" ]] || env_refs_missing=1
     done < <(tr ';' '\n' <<<"${MAC_RELEASE_OP_ENV_REFS}")
   fi
-  if [[ "$primary_missing" != "1" && "$codesign_missing" != "1" && "$env_refs_missing" != "1" ]]; then
+  if [[ "$mode" != "codesign-only" && -n "${MAC_RELEASE_SPARKLE_OP_REF:-}" &&
+    ! -f "${SPARKLE_PRIVATE_KEY_FILE:-}" ]]; then
+    [[ "$MAC_RELEASE_SPARKLE_OP_REF" == op://* ]] ||
+      mac_release_die "MAC_RELEASE_SPARKLE_OP_REF must be an op:// reference"
+    sparkle_missing=1
+  fi
+  if [[ "$primary_missing" != "1" && "$codesign_missing" != "1" &&
+    "$env_refs_missing" != "1" && "$sparkle_missing" != "1" ]]; then
     if [[ "$mode" == "all" ]]; then
       for release_op_field in ${MAC_RELEASE_OP_FIELDS:-}; do
         export "${release_op_field?}"
@@ -104,7 +117,7 @@ mac_release_load_1password_env() {
 
   require_bin tmux op node
   local account vault socket_dir socket session op_window work_dir script runner env_file log_file status_file
-  local service_account_token_file needs_service_account=0
+  local service_account_token_file sparkle_temp_key_file needs_service_account=0
   account=${MAC_RELEASE_OP_ACCOUNT:-my.1password.com}
   vault=${MAC_RELEASE_OP_VAULT:-}
   socket_dir=${CLAWDBOT_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/clawdbot-tmux-sockets}
@@ -120,14 +133,37 @@ mac_release_load_1password_env() {
   env_file="$work_dir/secrets.env"
   log_file="$work_dir/op.log"
   status_file="$work_dir/status"
+  sparkle_temp_key_file=
+  if [[ "$sparkle_missing" == "1" ]]; then
+    sparkle_temp_key_file=$(mktemp /tmp/mac-release-sparkle-key.XXXXXX)
+    chmod 600 "$sparkle_temp_key_file"
+  fi
   local old_exit_trap
   old_exit_trap=$(trap -p EXIT || true)
   # shellcheck disable=SC2329 # invoked via traps while this function is active
   cleanup_1password_env() {
-    [[ -z "${work_dir:-}" ]] || rm -rf "$work_dir"
     # Kill only our task window; the op-work session stays for other flows.
-    [[ -z "${op_window:-}" ]] || tmux -S "$socket" kill-window -t "$op_window" 2>/dev/null || true
+    local pane_pid=
+    if [[ -n "${op_window:-}" ]]; then
+      pane_pid=$(tmux -S "$socket" display-message -p -t "$op_window" '#{pane_pid}' 2>/dev/null || true)
+      tmux -S "$socket" kill-window -t "$op_window" 2>/dev/null || true
+      if [[ -n "$pane_pid" ]]; then
+        local wait_count=0
+        while kill -0 "$pane_pid" 2>/dev/null && ((wait_count < 40)); do
+          sleep 0.05
+          wait_count=$((wait_count + 1))
+        done
+        if kill -0 "$pane_pid" 2>/dev/null; then
+          kill -TERM "$pane_pid" 2>/dev/null || true
+          sleep 0.1
+        fi
+      fi
+    fi
     op_window=
+    # The producer is gone before either its destination or generated scripts
+    # are unlinked, so a late op read cannot recreate the private-key file.
+    [[ -z "${sparkle_temp_key_file:-}" ]] || rm -f "$sparkle_temp_key_file"
+    [[ -z "${work_dir:-}" ]] || rm -rf "$work_dir"
   }
   restore_1password_traps() {
     if [[ -n "$old_exit_trap" ]]; then
@@ -148,6 +184,10 @@ mac_release_load_1password_env() {
     needs_service_account=1
   fi
   if [[ "$env_refs_missing" == "1" && "${MAC_RELEASE_OP_USE_SERVICE_ACCOUNT:-0}" == "1" ]]; then
+    needs_service_account=1
+  fi
+  if [[ "$sparkle_missing" == "1" &&
+    "${MAC_RELEASE_SPARKLE_OP_USE_SERVICE_ACCOUNT-${MAC_RELEASE_OP_USE_SERVICE_ACCOUNT:-0}}" == "1" ]]; then
     needs_service_account=1
   fi
   service_account_token_file=
@@ -178,6 +218,10 @@ codesign_path_field=${MAC_RELEASE_CODESIGN_OP_PATH_FIELD:-keychain_path}
 codesign_password_field=${MAC_RELEASE_CODESIGN_OP_PASSWORD_FIELD:-keychain_password}
 codesign_passwordless=${MAC_RELEASE_CODESIGN_PASSWORDLESS:-0}
 read_codesign=${MAC_RELEASE_CODESIGN_OP_READ:-0}
+sparkle_ref=${MAC_RELEASE_SPARKLE_OP_REF:-}
+sparkle_account=${MAC_RELEASE_SPARKLE_OP_ACCOUNT:-$account}
+sparkle_key_file=${MAC_RELEASE_SPARKLE_KEY_FILE:-}
+read_sparkle=${MAC_RELEASE_SPARKLE_OP_READ:-0}
 env_file=${MAC_RELEASE_OP_ENV_FILE:?}
 log_file=${MAC_RELEASE_OP_LOG_FILE:?}
 work_dir=$(mktemp -d /tmp/mac-release-op-json.XXXXXX)
@@ -282,6 +326,23 @@ if [[ "${MAC_RELEASE_OP_ENV_REFS_READ:-0}" == "1" && -n "${MAC_RELEASE_OP_ENV_RE
   done 3< <(tr ';' '\n' <<<"${MAC_RELEASE_OP_ENV_REFS}")
 fi
 
+if [[ "$read_sparkle" == "1" ]]; then
+  [[ "$sparkle_ref" == op://* ]] || { echo "invalid Sparkle 1Password reference" >&2; exit 1; }
+  [[ -n "$sparkle_key_file" ]] || { echo "missing Sparkle temp-key path" >&2; exit 1; }
+  sparkle_value=$(run_op \
+    "${MAC_RELEASE_SPARKLE_OP_USE_SERVICE_ACCOUNT-${MAC_RELEASE_OP_USE_SERVICE_ACCOUNT:-0}}" \
+    "$sparkle_account" read "$sparkle_ref" 2>>"$log_file") || {
+    echo "Sparkle key read failed" >&2
+    exit 1
+  }
+  [[ -n "$sparkle_value" ]] || { echo "empty Sparkle private key" >&2; exit 1; }
+  (umask 077; printf '%s\n' "$sparkle_value" >"$sparkle_key_file")
+  chmod 600 "$sparkle_key_file"
+  unset sparkle_value
+  printf 'export SPARKLE_PRIVATE_KEY_FILE=%q\n' "$sparkle_key_file" >>"$env_file"
+  echo "Sparkle private key prepared in a mode-0600 temporary file" >&2
+fi
+
 chmod 600 "$env_file"
 echo "1Password fields exported: $(wc -l <"$env_file" | tr -d ' ')"
 SCRIPT
@@ -308,6 +369,11 @@ SCRIPT
     printf 'export MAC_RELEASE_CODESIGN_OP_READ=%q\n' "$codesign_missing"
     printf 'export MAC_RELEASE_OP_ENV_REFS=%q\n' "${MAC_RELEASE_OP_ENV_REFS:-}"
     printf 'export MAC_RELEASE_OP_ENV_REFS_READ=%q\n' "$env_refs_missing"
+    printf 'export MAC_RELEASE_SPARKLE_OP_REF=%q\n' "${MAC_RELEASE_SPARKLE_OP_REF:-}"
+    printf 'export MAC_RELEASE_SPARKLE_OP_ACCOUNT=%q\n' "${MAC_RELEASE_SPARKLE_OP_ACCOUNT:-$account}"
+    printf 'export MAC_RELEASE_SPARKLE_OP_USE_SERVICE_ACCOUNT=%q\n' "${MAC_RELEASE_SPARKLE_OP_USE_SERVICE_ACCOUNT-${MAC_RELEASE_OP_USE_SERVICE_ACCOUNT:-0}}"
+    printf 'export MAC_RELEASE_SPARKLE_OP_READ=%q\n' "$sparkle_missing"
+    printf 'export MAC_RELEASE_SPARKLE_KEY_FILE=%q\n' "$sparkle_temp_key_file"
     printf 'export MAC_RELEASE_OP_ENV_FILE=%q\n' "$env_file"
     printf 'export MAC_RELEASE_OP_LOG_FILE=%q\n' "$log_file"
     printf 'export MAC_RELEASE_OP_SERVICE_ACCOUNT_TOKEN_FILE=%q\n' "$service_account_token_file"
@@ -360,12 +426,23 @@ RUNNER
   if [[ -n "${MAC_RELEASE_CODESIGN_KEYCHAIN_PASSWORD:-}" ]]; then
     export -n MAC_RELEASE_CODESIGN_KEYCHAIN_PASSWORD
   fi
-  if [[ -n "${MAC_RELEASE_CODESIGN_OP_ITEM:-}" ]]; then
+  if [[ "$mode" != "sparkle-only" && -n "${MAC_RELEASE_CODESIGN_OP_ITEM:-}" ]]; then
     export MAC_RELEASE_CODESIGN_KEYCHAIN
     [[ -n "${MAC_RELEASE_CODESIGN_KEYCHAIN:-}" ]] || mac_release_die "1Password did not populate MAC_RELEASE_CODESIGN_KEYCHAIN"
     if [[ "$codesign_passwordless" != "1" ]]; then
       [[ -n "${MAC_RELEASE_CODESIGN_KEYCHAIN_PASSWORD:-}" ]] || mac_release_die "1Password did not populate MAC_RELEASE_CODESIGN_KEYCHAIN_PASSWORD"
     fi
+  fi
+  if [[ "$sparkle_missing" == "1" ]]; then
+    [[ -f "${SPARKLE_PRIVATE_KEY_FILE:-}" ]] ||
+      mac_release_die "1Password did not prepare SPARKLE_PRIVATE_KEY_FILE"
+    local sparkle_key_mode
+    sparkle_key_mode=$(stat -f '%Lp' "$SPARKLE_PRIVATE_KEY_FILE" 2>/dev/null || stat -c '%a' "$SPARKLE_PRIVATE_KEY_FILE")
+    [[ "$sparkle_key_mode" == "600" ]] ||
+      mac_release_die "Sparkle private key temp file must have mode 0600"
+    _MAC_RELEASE_OWNED_SPARKLE_RAW_FILE=$SPARKLE_PRIVATE_KEY_FILE
+    export SPARKLE_PRIVATE_KEY_FILE
+    sparkle_temp_key_file=
   fi
   sed -n '1,80p' "$log_file" >&2 || true
   cleanup_1password_env
@@ -491,7 +568,8 @@ require_clean_worktree() {
 }
 
 clean_key() {
-  local keyfile=${1:?"key file required"}
+  local out_var=${1:?"output variable required"}
+  local keyfile=${2:?"key file required"}
   [[ -f "$keyfile" ]] || mac_release_die "Sparkle key file not found: $keyfile"
   local lines
   lines=$(grep -v '^[[:space:]]*#' "$keyfile" | sed '/^[[:space:]]*$/d')
@@ -499,9 +577,24 @@ clean_key() {
     mac_release_die "Sparkle key must be a single base64 line (no comments/blank lines)."
   fi
   local tmp
-  tmp=$(mktemp)
+  tmp=$(umask 077; mktemp /tmp/mac-release-sparkle-clean.XXXXXX)
+  printf -v "$out_var" '%s' "$tmp"
+  _MAC_RELEASE_OWNED_SPARKLE_CLEAN_FILE=$tmp
   printf "%s\n" "$lines" >"$tmp"
-  echo "$tmp"
+  chmod 600 "$tmp"
+}
+
+mac_release_cleanup_temp_sparkle_key() {
+  [[ -z "${_MAC_RELEASE_OWNED_SPARKLE_RAW_FILE:-}" ]] || rm -f "$_MAC_RELEASE_OWNED_SPARKLE_RAW_FILE"
+  [[ -z "${_MAC_RELEASE_OWNED_SPARKLE_CLEAN_FILE:-}" ]] || rm -f "$_MAC_RELEASE_OWNED_SPARKLE_CLEAN_FILE"
+  _MAC_RELEASE_OWNED_SPARKLE_RAW_FILE=
+  _MAC_RELEASE_OWNED_SPARKLE_CLEAN_FILE=
+}
+
+mac_release_resolve_sparkle_op_key() {
+  if [[ -z "${SPARKLE_PRIVATE_KEY_FILE:-}" && -n "${MAC_RELEASE_SPARKLE_OP_REF:-}" ]]; then
+    mac_release_load_1password_env sparkle-only
+  fi
 }
 
 probe_sparkle_key() {
@@ -601,21 +694,38 @@ mac_release_default_key_source() {
   printf 'keychain\n'
 }
 
-mac_release_sparkle_key_status() {
-  mac_release_load
-  local source=${1:-$(mac_release_default_key_source)}
-  local label_source=$source
-  local expected actual cleaned_source
-  # shellcheck disable=SC2329 # invoked via RETURN trap
+# shellcheck disable=SC2030,SC2031 # ownership clearing is intentionally local to this subshell
+mac_release_sparkle_key_status() (
+  local requested_source=${1:-}
+  local source label_source expected actual cleaned_source resolved_temp
+  # A subshell copies unexported variables. Discard copied ownership without
+  # deleting the caller's files, then own only files created by this run.
+  _MAC_RELEASE_OWNED_SPARKLE_RAW_FILE=
+  _MAC_RELEASE_OWNED_SPARKLE_CLEAN_FILE=
+  # shellcheck disable=SC2329 # invoked by the EXIT trap below
   cleanup_key_status() {
     [[ -z "${cleaned_source:-}" ]] || rm -f "$cleaned_source"
+    mac_release_cleanup_temp_sparkle_key
   }
+  trap cleanup_key_status EXIT
+
+  mac_release_load
+  if [[ -z "$requested_source" ]]; then
+    mac_release_resolve_sparkle_op_key
+  fi
+  source=${requested_source:-$(mac_release_default_key_source)}
+  label_source=$source
+  resolved_temp=${_MAC_RELEASE_OWNED_SPARKLE_RAW_FILE:-}
+  if [[ -z "$requested_source" && -n "$resolved_temp" ]]; then
+    label_source="1Password reference ${MAC_RELEASE_SPARKLE_OP_REF}"
+  fi
   if [[ "$source" != "keychain" ]]; then
     source=$(mac_release_expand "$source")
-    label_source=$source
-    source=$(clean_key "$source")
+    [[ -n "$resolved_temp" ]] || label_source=$source
+    if ! clean_key source "$source"; then
+      mac_release_die "Could not normalize Sparkle signing key"
+    fi
     cleaned_source=$source
-    trap cleanup_key_status RETURN
   fi
   expected=$(mac_release_expected_public_key)
   actual=$(mac_release_public_key_for_source "$source")
@@ -623,20 +733,21 @@ mac_release_sparkle_key_status() {
   printf 'embedded SUPublicEDKey: %s\n' "$expected"
   printf 'signing source: %s\n' "$(mac_release_key_source_label "$label_source")"
   printf 'signing public key: %s\n' "$actual"
-  cleanup_key_status
-  trap - RETURN
   if [[ "$actual" == "$expected" ]]; then
     printf 'status: match\n'
   else
     printf 'status: mismatch\n' >&2
     return 1
   fi
-}
+)
 
 mac_release_key_args_and_validate() {
   local out_var=${1:?"out var"}
   local key_file_var=${2:?"key file var"}
-  local key_source source cleaned_key_file actual expected
+  local key_source source cleaned_key_file actual expected resolved_temp
+  mac_release_resolve_sparkle_op_key
+  # shellcheck disable=SC2031 # status clears only its subshell copy
+  resolved_temp=${_MAC_RELEASE_OWNED_SPARKLE_RAW_FILE:-}
   key_source=${SPARKLE_PRIVATE_KEY_FILE:-}
   if [[ -z "$key_source" && -n "${MAC_RELEASE_SIGNING_KEY_FILE:-}" ]]; then
     local manifest_key_source
@@ -645,7 +756,16 @@ mac_release_key_args_and_validate() {
   fi
   if [[ -n "$key_source" ]]; then
     key_source=$(mac_release_expand "$key_source")
-    cleaned_key_file=$(clean_key "$key_source")
+    if ! clean_key cleaned_key_file "$key_source"; then
+      mac_release_cleanup_temp_sparkle_key
+      mac_release_die "Could not normalize Sparkle signing key"
+    fi
+    if [[ -n "$resolved_temp" ]]; then
+      rm -f "$resolved_temp"
+      _MAC_RELEASE_OWNED_SPARKLE_RAW_FILE=
+      SPARKLE_PRIVATE_KEY_FILE=$cleaned_key_file
+      export SPARKLE_PRIVATE_KEY_FILE
+    fi
     source="$cleaned_key_file"
     eval "$key_file_var=\"\$cleaned_key_file\""
     eval "$out_var=(--ed-key-file \"\$cleaned_key_file\")"
@@ -1494,6 +1614,9 @@ mac_release_codesign_run() {
     mac_release_die "Usage: mac-release codesign-run [--with-package-secrets] -- <command> [args...]"
 
   mac_release_load_codesign_config
+  # Arm cleanup before credential resolution so an early failure cannot leave
+  # a resolved Sparkle private-key file behind.
+  trap 'mac_release_cleanup_temp_sparkle_key' EXIT
   mac_release_load_1password_env "$load_mode"
   if [[ "$load_mode" == "codesign-only" ]]; then
     local release_op_field
@@ -1506,6 +1629,7 @@ mac_release_codesign_run() {
   # shellcheck disable=SC2329 # invoked via EXIT trap
   cleanup_codesign_run() {
     local rc=$?
+    mac_release_cleanup_temp_sparkle_key
     if ! mac_release_restore_codesign_keychains; then
       sleep 1
       mac_release_restore_codesign_keychains || true
@@ -1527,6 +1651,7 @@ mac_release_codesign_run() {
   else
     return "$cleanup_rc"
   fi
+  mac_release_cleanup_temp_sparkle_key
   return "$command_rc"
 }
 
@@ -1542,6 +1667,7 @@ mac_release_release() {
   pre_release_head=$(git rev-parse HEAD)
   ensure_changelog_finalized "$MARKETING_VERSION"
   ensure_appcast_monotonic "$APPCAST" "$MARKETING_VERSION" "$BUILD_NUMBER"
+  trap 'mac_release_cleanup_temp_sparkle_key' EXIT
   mac_release_load_1password_env
   mac_release_run_cmd "precheck" "${MAC_RELEASE_PRECHECK:-}"
   KEY_ARGS=()
@@ -1549,6 +1675,7 @@ mac_release_release() {
   # shellcheck disable=SC2329 # invoked via EXIT trap
   cleanup_release() {
     local rc=$?
+    mac_release_cleanup_temp_sparkle_key
     if ! mac_release_restore_codesign_keychains; then
       sleep 1
       if ! mac_release_restore_codesign_keychains; then
