@@ -230,8 +230,7 @@ if command -v curl >/dev/null 2>&1 && \
     type == "object" and
     (.pending | type == "number") and
     (.dispatching | type == "number") and
-    (.leased | type == "number") and
-    (.target_stats | type == "array")
+    (.leased | type == "number")
   ' "$exact_queue_json" >/dev/null; then
   exact_queue_available=true
 else
@@ -381,53 +380,58 @@ if [ "$exact_queue_available" = true ]; then
     exact_active_display="${exact_active}/${exact_capacity}"
   fi
 
-  target_exact_active="$(jq -r --arg target "$target_repo" '[.target_stats[]?
-    | select(.target_repo == $target)
-    | ((.dispatching // 0) + (.leased // 0))][0] // 0' "$exact_queue_json")"
-  target_exact_pending="$(jq -r --arg target "$target_repo" '[.target_stats[]?
-    | select(.target_repo == $target)
-    | (.pending // 0)][0] // 0' "$exact_queue_json")"
-  target_exact_active_display="$target_exact_active"
-  if [ -n "$exact_target_capacity" ]; then
-    target_exact_active_display="${target_exact_active}/${exact_target_capacity}"
+  # Public aggregates omit private target occupancy; only an array can establish zero.
+  if jq -e '.target_stats | type == "array"' "$exact_queue_json" >/dev/null; then
+    target_exact_active="$(jq -r --arg target "$target_repo" '[.target_stats[]
+      | select(.target_repo == $target)
+      | ((.dispatching // 0) + (.leased // 0))][0] // 0' "$exact_queue_json")"
+    target_exact_pending="$(jq -r --arg target "$target_repo" '[.target_stats[]
+      | select(.target_repo == $target)
+      | (.pending // 0)][0] // 0' "$exact_queue_json")"
+    target_exact_active_display="$target_exact_active"
+    if [ -n "$exact_target_capacity" ]; then
+      target_exact_active_display="${target_exact_active}/${exact_target_capacity}"
+    fi
+    target_exact_display="${target_exact_active_display} active, ${target_exact_pending} pending"
+  else
+    target_exact_display="occupancy unavailable"
   fi
-  printf -- "- Exact-review queue: %s active, %s pending (target %s: %s active, %s pending)\n" \
-    "$exact_active_display" "$exact_pending" "$target_repo" "$target_exact_active_display" "$target_exact_pending"
+  printf -- "- Exact-review queue: %s active, %s pending (target %s: %s)\n" \
+    "$exact_active_display" "$exact_pending" "$target_repo" "$target_exact_display"
 
-  # Depth alone hides the failure modes that actually stall the lane: items can be
-  # ready, in throttle backoff, or parked after retry exhaustion, and only the last
-  # needs an operator. Surface that split plus handoff health.
-  queue_health="$(jq -r '
-    def reasons: to_entries | map("\(.key) \(.value)") | join(", ");
-    [
-      (.handoff_health.status // "unknown"),
-      (.handoff_health.reason // ""),
-      (.ready_pending // 0 | tostring),
-      (.admissible_pending // 0 | tostring),
-      ((.oldest_pending_key // "") | tostring),
-      ((.oldest_pending_age_seconds // 0) / 60 | floor | tostring),
-      ((.lanes.review.backoff_reasons // {}) | reasons),
-      ((.lanes.review.parked_reasons // {}) | reasons),
-      (.shed_since_reset // 0 | tostring)
-    ] | @tsv' "$exact_queue_json" 2>/dev/null)"
-  if [ -n "$queue_health" ]; then
-    IFS=$'\t' read -r qh_status qh_reason qh_ready qh_admissible qh_oldest_key qh_oldest_min \
-      qh_backoff qh_parked qh_shed <<<"$queue_health"
-    health_line="- Queue health: ${qh_status}"
-    [ -n "$qh_reason" ] && health_line="${health_line} (${qh_reason})"
-    health_line="${health_line} — ready ${qh_ready}, admissible ${qh_admissible}"
-    if [ -n "$qh_oldest_key" ]; then
-      health_line="${health_line}, oldest pending ${qh_oldest_key} ${qh_oldest_min}m"
-    fi
-    printf -- "%s\n" "$health_line"
-    [ -n "$qh_backoff" ] && printf -- "- Queue backoff: %s\n" "$qh_backoff"
-    if [ -n "$qh_parked" ]; then
-      printf -- "- Queue parked (needs operator): %s\n" "$qh_parked"
-    fi
-    if [ "${qh_shed:-0}" != "0" ]; then
-      printf -- "- Shed since reset: %s\n" "$qh_shed"
-    fi
-  fi
+  # Render directly: Bash read collapses empty TSV fields and shifts optional health data.
+  jq -r '
+    def count: if type == "number" then tostring else "unknown" end;
+    def text: if type == "string" then . else "" end;
+    def reason_line($label):
+      if type == "object" then
+        to_entries | map(select(.value | type == "number" and . > 0))
+        | map("\(.key) \(.value)") | join(", ")
+        | select(length > 0) | "- \($label): \(.)"
+      else empty end;
+
+    ("- Queue health: \((.handoff_health.status | text | select(length > 0)) // "unknown")" +
+      (.handoff_health.reason | text | if length > 0 then " (\(.))" else "" end) +
+      " — ready \(.ready_pending | count), admissible \(.admissible_pending | count)" +
+      (if (.oldest_pending_age_seconds | type) == "number" then
+        ", oldest pending " +
+        (.oldest_pending_key | text | if length > 0 then . + " " else "" end) +
+        "\(.oldest_pending_age_seconds / 60 | floor)m"
+      elif (.oldest_pending_key | text | length) > 0 then
+        ", oldest pending \(.oldest_pending_key) (age unknown)"
+      else "" end)),
+    (.lanes.review.backoff_reasons | reason_line("Queue backoff")),
+    (.lanes.review.parked_reasons | reason_line("Queue parked (needs operator)")),
+    (.shed_since_reset | select(type == "number" and . != 0) | "- Shed since reset: \(.)"),
+    (if (.lanes.publication | type) == "object" then
+      .lanes.publication |
+      ("- Publication tail: \(.pending | count) pending, \(.ready | count) ready, " +
+        "\(.backoff | count) backoff, \(.parked | count) parked, \(.active | count)" +
+        (if (.capacity | type) == "number" then "/\(.capacity)" else "" end) + " active"),
+      (.backoff_reasons | reason_line("Publication backoff")),
+      (.parked_reasons | reason_line("Publication parked (needs operator)"))
+    else "- Publication tail: unavailable" end)
+  ' "$exact_queue_json"
 else
   printf -- "- Exact-review queue: unavailable\n"
 fi

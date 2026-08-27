@@ -1,0 +1,33 @@
+{
+  "pending": 9,
+  "dispatching": 3,
+  "leased": 5,
+  "ready_pending": 2,
+  "admissible_pending": 1,
+  "handoff_health": {
+    "status": "warning",
+    "reason": "handoff_delayed"
+  },
+  "oldest_pending_age_seconds": 725,
+  "shed_since_reset": 17,
+  "lanes": {
+    "review": {
+      "pending": 9,
+      "ready": 2,
+      "backoff": 7,
+      "parked": 3,
+      "backoff_reasons": {"throttle_retry": 5, "review_retry": 2},
+      "parked_reasons": {"review_retry_exhausted": 3}
+    },
+    "publication": {
+      "pending": 11,
+      "ready": 7,
+      "backoff": 4,
+      "parked": 2,
+      "active": 1,
+      "capacity": 6,
+      "backoff_reasons": {"publication_retry": 4, "throttle_retry": 0},
+      "parked_reasons": {"dispatch_rejected": 2}
+    }
+  }
+}

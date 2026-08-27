@@ -6,6 +6,7 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 ## Unreleased
 
+- Fixed `clawsweeper-status` public queue parsing, preserved optional health fields without shifted columns, and added a separate publication-tail summary.
 - Added headless Sparkle signing through scoped 1Password references, with public-key validation, mode-0600 temporary files, and cleanup on success or failure.
 - Corrected GitHub secret provisioning to omit `--body` for stdin and added a skill validation guard against the literal-dash trap.
 - Taught the `clawsweeper-status` snapshot to report queue handoff health, the ready/admissible split, backoff and parked reasons, and shed-since-reset, so exact-review items parked on retry exhaustion are no longer invisible behind a `healthy` verdict.
