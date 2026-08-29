@@ -61,11 +61,11 @@ Prefer current source and executable proof over issue comments. Treat stale comm
 
 For bug/regression reviews, include a compact `Provenance:` answer when feasible:
 
-- Use `git log -S/-G`, `git blame`, linked PRs/issues, and tests.
-- Separate commit author, merger, and current PR author when they differ.
-- Phrase as `introduced by`, `made visible by`, or `carried forward by`.
-- Include confidence: `clear`, `likely`, or `unknown`.
-- For features, docs, refactors, or untraceable bugs, write `N/A` or say what evidence is missing.
+- Use `git log -S/-G`, `git blame`, and linked PRs/issues to locate candidates, not prove introduction. Before saying `introduced by`, inspect raw parents with `git --no-replace-objects cat-file -p <sha>` and verify that `git --no-replace-objects diff --no-ext-diff --no-textconv <raw-parent> <sha> -- <path>` changed the implicated behavior, using tests/repro when feasible. A genuine root needs raw-header proof that it has no parents.
+- Blame `^sha`, porcelain `boundary`, and shallow/grafted history alone are not introduction proof. `--root` can hide boundary markers; `git show` and `rev-list --parents` can disguise a shallow boundary as a root. An available raw parent permits explicit comparison even at a shallow boundary; missing parents or an unverifiable patch require `unknown` with the gap, not inference from a subject, date, or author.
+- Separate code author, introducing PR author, merger, committer, automation trigger, and current PR author. Verify identities and triggers from explicit metadata/events; a role is not proof of causation, and an unverified identity stays unknown.
+- Use `made visible by` only for a verified trigger and `carried forward by` only for verified preexisting behavior. Apply the same evidence bar to summaries and owner hints, not just a `Provenance:` field. Include confidence: `clear`, `likely`, or `unknown`.
+- For features, docs, and refactors, write `N/A`; for untraceable bugs, report `unknown` with the missing evidence. Missing provenance does not invalidate an independently proven bug.
 
 ## Fix Quality Bar
 
