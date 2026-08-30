@@ -24,12 +24,20 @@ jobs:
 
       - name: Check shell helper syntax
         run: |
+          bash -n scripts/sync-skills
+          bash -n scripts/test-sync-skills
           find skills -path '*/scripts/*' -type f -print0 |
             while IFS= read -r -d '' script; do
               if head -n 1 "$script" | grep -q 'bash'; then
                 bash -n "$script"
               fi
             done
+
+      - name: Test skill link sync and audit
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+          /bin/bash scripts/test-sync-skills
 
       - name: Test ClawSweeper status helper
         run: skills/clawsweeper-status/scripts/clawsweeper-status.test.sh

@@ -9,7 +9,7 @@ agents_md="$HOME/Projects/agent-scripts/AGENTS.MD"
 repair=${1:-}
 failures=0
 
-if [ -n "$repair" ] && [ "$repair" != "--repair" ]; then
+if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$repair" != "--repair" ]; }; then
   printf 'usage: %s [--repair]\n' "$0" >&2
   exit 2
 fi
@@ -83,6 +83,18 @@ for link_path in "$claude_root"/* "$claude_root"/.[!.]*; do
   broken=$((broken + 1))
 done
 failures=$((failures + broken))
+
+# Narrow ancestor-loop detection, not an exhaustive symlink graph validator.
+# A nested link resolving successfully to its real parent is still a loop.
+for entry in "$claude_root"/* "$claude_root"/.[!.]* "$claude_root"/..?*; do
+  [ ! -L "$entry" ] && [ -d "$entry" ] || continue
+  name=${entry##*/}
+  nested="$entry/$name"
+  if [ -L "$nested" ] && [ "$nested" -ef "$entry" ]; then
+    printf 'skill-links-drift\tpath=%s\treason=nested-self-link\n' "$nested"
+    failures=$((failures + 1))
+  fi
+done
 
 claude_count=$(find "$claude_root" -mindepth 1 -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' ')
 if [ "$failures" -eq 0 ]; then

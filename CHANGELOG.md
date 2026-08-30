@@ -6,6 +6,7 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 ## Unreleased
 
+- Fixed skill sync nesting links inside locally owned directories; added bounded allowlisted self-link repair and read-only audit detection.
 - Removed the machine-specific 1Password skill from the public skill set; local discovery now uses its private owner.
 - Fixed `clawsweeper-status` aborting before activity sections on large workflow snapshots while preserving row caps and upstream errors.
 - Fixed `clawsweeper-status` public queue parsing, preserved optional health fields without shifted columns, and added a separate publication-tail summary.

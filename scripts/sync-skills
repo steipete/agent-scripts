@@ -8,17 +8,140 @@
 # Collision priority: agent-scripts > manager > codex-local extras.
 set -eo pipefail
 
+usage() {
+  printf 'usage: %s [--help | --repair-nested-self-links [--dry-run] -- NAME...]\n' "$0"
+}
+
+repair=0
+dry_run=0
+if [ "$#" -gt 0 ]; then
+  case "$1" in
+    --help) [ "$#" -eq 1 ] || { usage >&2; exit 2; }; usage; exit 0 ;;
+    --repair-nested-self-links)
+      repair=1
+      shift
+      if [ "${1:-}" = --dry-run ]; then dry_run=1; shift; fi
+      [ "${1:-}" = -- ] || { usage >&2; exit 2; }
+      shift
+      [ "$#" -gt 0 ] || { usage >&2; exit 2; }
+      repair_names=()
+      for name in "$@"; do
+        case "$name" in
+          ''|[!a-zA-Z0-9]*|*[!a-zA-Z0-9._-]*)
+            printf 'invalid skill basename: %s\n' "$name" >&2; exit 2 ;;
+        esac
+        for previous in "${repair_names[@]}"; do
+          [ "$name" != "$previous" ] || { printf 'duplicate skill name: %s\n' "$name" >&2; exit 2; }
+        done
+        repair_names+=("$name")
+      done
+      ;;
+    *) usage >&2; exit 2 ;;
+  esac
+fi
+
 AGENT_SKILLS="$HOME/Projects/agent-scripts/skills"
 MANAGER_SKILLS="$HOME/Projects/manager/skills"
 CODEX_ROOT="$HOME/.codex/skills"
 CLAUDE_ROOT="$HOME/.claude/skills"
 AGENTS_MD="$HOME/Projects/agent-scripts/AGENTS.MD"
 
+# This mode exits before any ordinary mirror or instruction-pointer work.
+if [ "$repair" -eq 1 ]; then
+  removed=0
+  absent=0
+  refuse() {
+    printf 'nested-self-links: refused: %s (removed=%s already-absent=%s)\n' "$*" "$removed" "$absent" >&2
+    exit 1
+  }
+  # BSD and GNU stat both default to the link itself, not its target.
+  if stat -c '%d:%i' "$HOME" >/dev/null 2>&1; then
+    stat_args=(-c '%d:%i')
+  else
+    stat_args=(-f '%d:%i')
+  fi
+  identity() { stat "${stat_args[@]}" "$1"; }
+  roots=("$HOME" "$HOME/.claude" "$HOME/.codex" "$CLAUDE_ROOT" "$CODEX_ROOT")
+  root_ids=()
+  check_roots() {
+    local i root physical current
+    for i in "${!roots[@]}"; do
+      root=${roots[$i]}
+      [ ! -L "$root" ] && [ -d "$root" ] && [ -r "$root" ] && [ -x "$root" ] || refuse "not an accessible real root: $root"
+      physical=$(cd "$root" && pwd -P) || refuse "cannot resolve root: $root"
+      [ "$physical" = "$root" ] || refuse "redirected root: $root"
+      current=$(identity "$root") || refuse "cannot identify root: $root"
+      [ "$current" = "${root_ids[$i]:-$current}" ] || refuse "root changed: $root"
+      root_ids[$i]=$current
+    done
+  }
+  check_candidate() {
+    local parent="$CLAUDE_ROOT/$1" backlink="$CODEX_ROOT/$1" nested="$CLAUDE_ROOT/$1/$1" target
+    [ ! -L "$parent" ] && [ -d "$parent" ] && [ -r "$parent" ] && [ -x "$parent" ] || refuse "not an accessible real skill directory: $parent"
+    [ -f "$parent/SKILL.md" ] && [ -r "$parent/SKILL.md" ] || refuse "missing or unreadable SKILL.md: $parent"
+    [ -L "$backlink" ] || refuse "not a Codex backlink: $backlink"
+    target=$(readlink "$backlink") || refuse "cannot read backlink: $backlink"
+    [ "$target" = "$parent" ] && [ "$parent" -ef "$backlink" ] || refuse "unexpected Codex backlink: $backlink"
+    candidate_state=absent
+    candidate_leaf_id=absent
+    if [ -L "$nested" ]; then
+      target=$(readlink "$nested") || refuse "cannot read nested link: $nested"
+      [ "$target" = "$backlink" ] && [ "$parent" -ef "$nested" ] && [ "$backlink" -ef "$nested" ] || refuse "unexpected nested link: $nested"
+      candidate_state=present
+      candidate_leaf_id=$(identity "$nested") || refuse "cannot identify nested link: $nested"
+    elif [ -e "$nested" ]; then
+      refuse "nested entry is not a symlink: $nested"
+    fi
+    candidate_parent_id=$(identity "$parent") || refuse "cannot identify skill directory: $parent"
+    candidate_backlink_id=$(identity "$backlink") || refuse "cannot identify backlink: $backlink"
+  }
+  check_roots
+  parent_ids=(); backlink_ids=(); leaf_ids=(); states=()
+  for i in "${!repair_names[@]}"; do
+    check_candidate "${repair_names[$i]}"
+    parent_ids[$i]=$candidate_parent_id
+    backlink_ids[$i]=$candidate_backlink_id
+    leaf_ids[$i]=$candidate_leaf_id
+    states[$i]=$candidate_state
+  done
+  for i in "${!repair_names[@]}"; do
+    name=${repair_names[$i]}
+    nested="$CLAUDE_ROOT/$name/$name"
+    # Recheck the roots and this candidate immediately before unlinking. These
+    # shell checks detect drift but cannot make pathname-based unlink atomic.
+    check_roots
+    check_candidate "$name"
+    [ "$candidate_parent_id" = "${parent_ids[$i]}" ] &&
+      [ "$candidate_backlink_id" = "${backlink_ids[$i]}" ] &&
+      [ "$candidate_leaf_id" = "${leaf_ids[$i]}" ] &&
+      [ "$candidate_state" = "${states[$i]}" ] || refuse "topology changed: $name"
+    if [ "$candidate_state" = absent ]; then
+      absent=$((absent + 1))
+      printf 'already-absent %s\n' "$nested"
+    elif [ "$dry_run" -eq 1 ]; then
+      printf 'would-remove %s\n' "$nested"
+    else
+      unlink "$nested" || refuse "unlink failed: $nested"
+      removed=$((removed + 1))
+      printf 'removed %s\n' "$nested"
+    fi
+  done
+  [ "$dry_run" -eq 1 ] || printf 'nested-self-links: removed=%s already-absent=%s\n' "$removed" "$absent"
+  exit 0
+fi
+
 changed=0
+conflicts=0
 note() { printf '%s\n' "$*"; changed=1; }
 
 # link <target> <linkpath>: create/retarget symlink, quiet when already right.
 link() {
+  if [ ! -L "$2" ] && [ -e "$2" ]; then
+    [ -d "$1" ] && [ -d "$2" ] && [ "$1" -ef "$2" ] && return 0
+    printf 'WARN: real destination preserved: %s (expected -> %s)\n' "$2" "$1" >&2
+    conflicts=$((conflicts + 1))
+    return 0
+  fi
   [ "$(readlink "$2" 2>/dev/null)" = "$1" ] && return 0
   ln -sfn "$1" "$2"
   note "link $2 -> $1"
@@ -87,17 +210,11 @@ for entry in "$CLAUDE_ROOT"/* "$CLAUDE_ROOT"/.[!.]*; do
   esac
 done
 
-# --- Global instruction pointers; never clobber a real file.
-ensure_md() {
-  if [ -e "$1" ] && [ ! -L "$1" ]; then
-    printf 'WARN: %s is a real file, not linking (expected -> %s)\n' "$1" "$AGENTS_MD"
-    return 0
-  fi
-  link "$AGENTS_MD" "$1"
-}
-ensure_md "$HOME/.claude/CLAUDE.md"
-ensure_md "$HOME/.claude/AGENTS.md"
-ensure_md "$HOME/.codex/AGENTS.md"
+# --- Global instruction pointers use the same real-destination protection.
+link "$AGENTS_MD" "$HOME/.claude/CLAUDE.md"
+link "$AGENTS_MD" "$HOME/.claude/AGENTS.md"
+link "$AGENTS_MD" "$HOME/.codex/AGENTS.md"
 
+[ "$conflicts" -eq 0 ] || { printf 'skills mirror has %s real destination conflict(s)\n' "$conflicts" >&2; exit 1; }
 [ "$changed" = 0 ] && echo "skills mirror up to date (${#names[@]} skills)"
 exit 0

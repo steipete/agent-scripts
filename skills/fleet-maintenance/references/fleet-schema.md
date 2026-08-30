@@ -39,10 +39,12 @@ Every fleet Mac must have:
 
 - `~/.codex/skills/agent-scripts -> ~/Projects/agent-scripts/skills`
 - `~/.codex/skills/manager -> ~/Projects/manager/skills`
-- a real `~/.claude/skills` directory containing flat per-skill links, with agent-scripts winning name collisions
+- a real `~/.claude/skills` directory containing flat per-skill links, with agent-scripts winning name collisions; locally owned real skill directories and valid Codex backlinks to them are preserved
 - `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`, and `~/.claude/AGENTS.md` pointing to `~/Projects/agent-scripts/AGENTS.MD`
 
-Run `scripts/agent-skill-links-audit.sh` read-only. Run it with `--repair` to invoke the canonical idempotent `~/Projects/agent-scripts/scripts/sync-skills`; never replace a conflicting real instruction file automatically.
+Run `scripts/agent-skill-links-audit.sh` read-only. Run it with `--repair` to invoke the canonical idempotent `~/Projects/agent-scripts/scripts/sync-skills` for broad mirror, pruning, and instruction-pointer work. Sync preserves every real destination, treats the same directory identity as satisfied local ownership, and fails on other real destination conflicts.
+
+The audit also reports `reason=nested-self-link` for same-name symlinks inside real top-level Claude directories that resolve back to their parent. This bounded read-only check is not an exhaustive graph validator. For this topology, call the reviewed sync owner directly by absolute path with `--repair-nested-self-links [--dry-run] -- NAME...`; the audit has no scoped repair wrapper or owner override. The owner requires a nonempty, unique safe-basename allowlist, accessible real registration roots, a real Claude skill directory with `SKILL.md`, and exact literal Codex/nested targets with matching directory identities. It validates the entire batch before unlinking only nested leaves and exits before ordinary sync. Already-absent leaves are no-ops only with valid surrounding topology. Revalidation catches drift but is not atomic against concurrent writers; later failures report partial progress without rollback. Real directories, contents, valid backlinks, unrelated entries, and shared instruction pointers remain untouched by scoped repair.
 
 Homebrew dependencies do not belong in `formulae`; declare intentionally installed leaves. Homebrew is rolling-release state, not a version lock.
 

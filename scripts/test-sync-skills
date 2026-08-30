@@ -1,0 +1,425 @@
+#!/bin/bash
+# Standalone, disposable-HOME coverage. --recurrence-only accepts an unmodified
+# old helper so the same assertion can prove the patch's regression provenance.
+set -euo pipefail
+
+script_dir=$(cd "$(dirname "$0")" && pwd -P)
+sync="$script_dir/sync-skills"
+audit="$script_dir/../skills/fleet-maintenance/scripts/agent-skill-links-audit.sh"
+recurrence_only=0
+if [ "$#" -gt 0 ]; then
+  if [ "$#" -ne 2 ] || [ "$1" != --recurrence-only ] || [ ! -f "$2" ]; then
+    printf 'usage: %s [--recurrence-only /absolute/path/to/sync-skills]\n' "$0" >&2
+    exit 2
+  fi
+  case "$2" in /*) sync=$2 ;; *) exit 2 ;; esac
+  recurrence_only=1
+fi
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/sync-skills-test.XXXXXX")
+cleanup() {
+  local cleanup_exit_code=$?
+  trap - EXIT
+  case "$scratch" in
+    "${TMPDIR:-/tmp}"/sync-skills-test.*)
+      chmod -R u+rwX "$scratch"
+      rm -rf "$scratch"
+      ;;
+    *) printf 'refusing unexpected temporary path: %s\n' "$scratch" >&2 ;;
+  esac
+  exit "$cleanup_exit_code"
+}
+trap cleanup EXIT
+
+names=(boxd-cli boxd-setup-deploy boxd-setup-golden boxd-setup-preview boxd-setup-fix boxd-setup-hermes)
+fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+contains() { rg -Fq -- "$1" "$output" || { cat "$output" >&2; fail "missing output: $1"; }; }
+new_case() {
+  case_root="$scratch/$1"
+  mkdir -p "$case_root/home"
+  fixture_home=$(cd "$case_root/home" && pwd -P)
+  claude="$fixture_home/.claude/skills"
+  codex="$fixture_home/.codex/skills"
+  agent="$fixture_home/Projects/agent-scripts/skills"
+  manager="$fixture_home/Projects/manager/skills"
+  output="$case_root/output"
+}
+run_sync() { HOME="$fixture_home" /bin/bash "$sync" "$@"; }
+run_audit() { HOME="$fixture_home" /bin/bash "$audit" "$@"; }
+make_skill() {
+  mkdir -p "$1/assets"
+  printf '# fixture skill\n' >"$1/SKILL.md"
+  printf 'preserved asset\n' >"$1/assets/data"
+}
+base_fixture() {
+  mkdir -p "$claude" "$codex" "$agent" "$manager"
+  printf 'fixture instructions\n' >"$fixture_home/Projects/agent-scripts/AGENTS.MD"
+  ln -s "$agent" "$codex/agent-scripts"
+  ln -s "$manager" "$codex/manager"
+  ln -s "$fixture_home/Projects/agent-scripts/AGENTS.MD" "$fixture_home/.codex/AGENTS.md"
+  ln -s "$fixture_home/Projects/agent-scripts/AGENTS.MD" "$fixture_home/.claude/AGENTS.md"
+  ln -s "$fixture_home/Projects/agent-scripts/AGENTS.MD" "$fixture_home/.claude/CLAUDE.md"
+}
+six_skills() {
+  local name
+  for name in "${names[@]}"; do
+    make_skill "$claude/$name"
+    ln -s "$claude/$name" "$codex/$name"
+    if [ "$1" = loops ]; then ln -s "$codex/$name" "$claude/$name/$name"; fi
+  done
+}
+# lstat snapshots never follow links: preserve inode/device, mode, file hashes,
+# and literal link targets, including hidden entries. Ignore directory mtimes.
+snapshot() {
+  python3 - "$1" <<'PY'
+import hashlib, json, os, stat, sys
+root = sys.argv[1]
+rows = {}
+def visit(path):
+    info = os.lstat(path)
+    row = [info.st_dev, info.st_ino, info.st_mode]
+    if stat.S_ISLNK(info.st_mode):
+        row.append(os.readlink(path))
+    elif stat.S_ISREG(info.st_mode):
+        with open(path, 'rb') as stream:
+            row.append(hashlib.sha256(stream.read()).hexdigest())
+    rows[os.path.relpath(path, root)] = row
+    if stat.S_ISDIR(info.st_mode):
+        for name in sorted(os.listdir(path)):
+            visit(os.path.join(path, name))
+visit(root)
+print(json.dumps(rows, sort_keys=True, indent=2))
+PY
+}
+unchanged() {
+  snapshot "$fixture_home" >"$case_root/after"
+  cmp "$case_root/before" "$case_root/after" || fail 'unexpected HOME mutation'
+}
+expect_rejected() {
+  local code=0
+  snapshot "$fixture_home" >"$case_root/before"
+  "$@" >"$output" 2>&1 || code=$?
+  [ "$code" -ne 0 ] || fail "expected rejection: $*"
+  unchanged
+}
+expect_usage() {
+  local code=0
+  snapshot "$fixture_home" >"$case_root/before"
+  "$@" >"$output" 2>&1 || code=$?
+  [ "$code" -eq 2 ] || fail "expected usage exit 2, got $code: $*"
+  unchanged
+}
+assert_registrations() {
+  local name
+  for name in "${names[@]}"; do
+    [ ! -L "$claude/$name" ] && [ -d "$claude/$name" ] || fail "lost real directory: $name"
+    [ -L "$codex/$name" ] && [ "$(readlink "$codex/$name")" = "$claude/$name" ] &&
+      [ "$claude/$name" -ef "$codex/$name" ] || fail "lost Codex backlink: $name"
+  done
+}
+recurrence() {
+  new_case recurrence
+  base_fixture
+  six_skills clean
+  snapshot "$claude" >"$case_root/skills-before"
+  run_sync >"$output" 2>&1
+  local name
+  for name in "${names[@]}"; do
+    [ ! -L "$claude/$name/$name" ] || fail "ordinary sync recreated nested self-link: $name"
+  done
+  snapshot "$claude" >"$case_root/skills-after"
+  cmp "$case_root/skills-before" "$case_root/skills-after" || fail 'ordinary sync changed locally owned skills'
+  assert_registrations
+  contains 'skills mirror up to date (6 skills)'
+  printf 'ordinary-sync recurrence: PASS\n'
+}
+recurrence
+[ "$recurrence_only" -eq 0 ] || exit 0
+
+new_case six-loop-lifecycle
+base_fixture
+six_skills loops
+expect_rejected run_audit
+[ "$(rg -c 'reason=nested-self-link' "$output")" -eq 6 ] || fail 'audit missed loops'
+for registry in "$claude" "$codex"; do
+  code=0
+  rg --files --follow --hidden -g SKILL.md "$registry" >"$case_root/rg-paths" 2>"$case_root/rg-errors" || code=$?
+  [ "$code" -eq 2 ] || fail 'rg did not report loops'
+  [ "$(rg -c 'loop' "$case_root/rg-errors")" -eq 6 ] || fail 'expected six rg loop errors'
+done
+snapshot "$fixture_home" >"$case_root/before"
+run_sync --repair-nested-self-links --dry-run -- "${names[@]}" >"$output"
+[ "$(rg -c '^would-remove ' "$output")" -eq 6 ] || fail 'dry-run operations'
+[ "$(wc -l <"$output")" -eq 6 ] || fail 'dry-run extra output'
+unchanged
+run_sync --repair-nested-self-links -- "${names[@]}" >"$output"
+contains 'nested-self-links: removed=6 already-absent=0'
+[ "$(rg -c '^removed ' "$output")" -eq 6 ] || fail 'removal operations'
+snapshot "$fixture_home" >"$case_root/after"
+python3 - "$case_root/before" "$case_root/after" "${names[@]}" <<'PY'
+import json, sys
+before, after = (json.load(open(path)) for path in sys.argv[1:3])
+for name in sys.argv[3:]:
+    del before[f'.claude/skills/{name}/{name}']
+assert before == after, 'repair changed more than the six nested links'
+PY
+assert_registrations
+run_audit >"$output"
+contains 'status=current'
+for registry in "$claude" "$codex"; do
+  rg --files --follow --hidden -g SKILL.md "$registry" >"$case_root/rg-paths" 2>"$case_root/rg-errors"
+  [ ! -s "$case_root/rg-errors" ] || fail 'rg errors after repair'
+done
+snapshot "$fixture_home" >"$case_root/before"
+run_sync --repair-nested-self-links -- "${names[@]}" >"$output"
+contains 'nested-self-links: removed=0 already-absent=6'
+unchanged
+run_sync --repair-nested-self-links --dry-run -- "${names[@]}" >"$output"
+[ "$(rg -c '^already-absent ' "$output")" -eq 6 ] || fail 'dry-run missing no-ops'
+unchanged
+run_sync >"$output"
+unchanged
+run_audit >"$output"
+printf 'six-loop lifecycle, snapshots and rg traversal: PASS\n'
+
+new_case scoped-preservation
+base_fixture
+six_skills loops
+ln -s "$agent" "$claude/healthy"
+ln -s "$fixture_home/missing" "$claude/broken"
+ln -s "$agent" "$claude/.hidden-healthy"
+ln -s "$fixture_home/missing" "$claude/.hidden-broken"
+ln -s "$agent" "$codex/.hidden-healthy"
+ln -s "$fixture_home/missing" "$codex/.hidden-broken"
+ln -s "$agent" "$claude/boxd-cli/unrelated"
+ln -s "$fixture_home/missing" "$claude/boxd-cli/.unrelated-broken"
+printf 'nested file\n' >"$claude/boxd-cli/other-file"
+# Scoped mode needs neither canonical repo nor shared instruction pointers.
+unlink "$fixture_home/.claude/AGENTS.md"
+printf 'real instructions\n' >"$fixture_home/.claude/AGENTS.md"
+mv "$fixture_home/Projects" "$fixture_home/Projects-unavailable"
+snapshot "$fixture_home" >"$case_root/before"
+run_sync --repair-nested-self-links --dry-run -- boxd-cli >"$output"
+unchanged
+run_sync --repair-nested-self-links -- boxd-cli >"$output"
+snapshot "$fixture_home" >"$case_root/after"
+python3 - "$case_root/before" "$case_root/after" <<'PY'
+import json, sys
+before, after = (json.load(open(path)) for path in sys.argv[1:])
+del before['.claude/skills/boxd-cli/boxd-cli']
+assert before == after, 'scoped repair touched unrelated entries or instruction pointers'
+PY
+printf 'scoped preservation: PASS\n'
+
+new_case parsing
+# Empty HOME proves invalid invocations cannot bootstrap the mirror.
+expect_usage run_sync --unknown
+expect_usage run_sync extra
+expect_usage run_sync ''
+expect_usage run_sync --dry-run
+expect_usage run_sync --help extra
+expect_usage run_sync --repair-nested-self-links
+expect_usage run_sync --repair-nested-self-links --
+expect_usage run_sync --repair-nested-self-links --dry-run --
+expect_usage run_sync --repair-nested-self-links boxd-cli
+expect_usage run_sync --repair-nested-self-links --dry-run --dry-run -- boxd-cli
+expect_usage run_sync --repair-nested-self-links --unknown -- boxd-cli
+expect_usage run_sync --repair-nested-self-links -- boxd-cli boxd-cli
+for bad in '' . .. ../boxd-cli boxd-cli/child /absolute .hidden -option 'two words' 'bad*' 'bad?' 'bad[1]' 'bad\\name' $'bad\nname'; do
+  expect_usage run_sync --repair-nested-self-links -- "$bad"
+done
+expect_usage run_sync --repair-nested-self-links -- boxd-cli --dry-run
+expect_usage run_audit --unknown
+expect_usage run_audit ''
+expect_usage run_audit --repair extra
+expect_usage run_audit --repair --repair
+snapshot "$fixture_home" >"$case_root/before"
+run_sync --help >"$output"
+unchanged
+expect_rejected run_sync --repair-nested-self-links -- boxd-cli
+printf 'strict argument parsing before mutation: PASS\n'
+
+# Every invalid final candidate must prevent removal of all earlier valid ones.
+for variant in nested-real-dir nested-real-file nested-wrong nested-relative nested-dangling backlink-real backlink-wrong backlink-relative backlink-dangling parent-link missing-skill absent-invalid inaccessible-parent; do
+  new_case "$variant"
+  base_fixture
+  six_skills loops
+  last=${names[5]}
+  parent="$claude/$last"
+  nested="$parent/$last"
+  case "$variant" in
+    nested-real-dir) unlink "$nested"; mkdir "$nested" ;;
+    nested-real-file) unlink "$nested"; printf 'keep\n' >"$nested" ;;
+    nested-wrong) unlink "$nested"; ln -s "$agent" "$nested" ;;
+    nested-relative) unlink "$nested"; ln -s . "$nested" ;;
+    nested-dangling) unlink "$nested"; ln -s "$fixture_home/missing" "$nested" ;;
+    backlink-real) unlink "$codex/$last"; make_skill "$codex/$last" ;;
+    backlink-wrong) unlink "$codex/$last"; ln -s "$agent" "$codex/$last" ;;
+    backlink-relative) unlink "$codex/$last"; ln -s "../../.claude/skills/$last" "$codex/$last" ;;
+    backlink-dangling) unlink "$codex/$last"; ln -s "$fixture_home/missing" "$codex/$last" ;;
+    parent-link) mv "$parent" "$fixture_home/other-parent"; ln -s "$fixture_home/other-parent" "$parent" ;;
+    missing-skill) mv "$parent/SKILL.md" "$parent/not-a-skill" ;;
+    absent-invalid) unlink "$nested"; unlink "$codex/$last" ;;
+    inaccessible-parent)
+      # CI and normal macOS runs are non-root; root bypasses mode restrictions.
+      if [ "$(id -u)" -eq 0 ]; then printf 'SKIP: inaccessible directory as root\n'; continue; fi
+      chmod 000 "$parent"
+      # Snapshot cannot read it either; capture with access, then restore mode
+      # after the rejected operation to compare every entry and inode.
+      chmod 700 "$parent"
+      snapshot "$fixture_home" >"$case_root/before"
+      chmod 000 "$parent"
+      code=0
+      run_sync --repair-nested-self-links -- "${names[@]}" >"$output" 2>&1 || code=$?
+      chmod 700 "$parent"
+      [ "$code" -ne 0 ] || fail 'inaccessible parent accepted'
+      unchanged
+      continue
+      ;;
+  esac
+  expect_rejected run_sync --repair-nested-self-links -- "${names[@]}"
+  contains 'removed=0 already-absent=0'
+  expect_rejected run_sync --repair-nested-self-links --dry-run -- "${names[@]}"
+done
+for component in .claude .codex .claude/skills .codex/skills; do
+  new_case "redirect-${component//\//-}"
+  base_fixture
+  six_skills loops
+  mv "$fixture_home/$component" "$fixture_home/redirected"
+  ln -s "$fixture_home/redirected" "$fixture_home/$component"
+  expect_rejected run_sync --repair-nested-self-links -- "${names[@]}"
+done
+new_case redirected-home
+base_fixture
+six_skills loops
+ln -s "$fixture_home" "$case_root/alias"
+expect_rejected env HOME="$case_root/alias" /bin/bash "$sync" --repair-nested-self-links -- "${names[@]}"
+printf 'topology refusals and whole-batch preflight: PASS\n'
+
+# Inject a deterministic failure/change after the first unlink, without races
+# or production test hooks. Only the temporary fixture is reachable by the stub.
+real_unlink=$(command -v unlink)
+for variant in io-error changed-parent changed-root; do
+  new_case "$variant"
+  base_fixture
+  six_skills loops
+  mkdir "$case_root/bin"
+  cat >"$case_root/bin/unlink" <<'STUB'
+#!/bin/bash
+set -eu
+case "$1" in "$HOME/.claude/skills/"*) ;; *) exit 90 ;; esac
+if [ "$1" = "$HOME/.claude/skills/boxd-cli/boxd-cli" ]; then
+  "$TEST_REAL_UNLINK" "$1"
+  case "$TEST_VARIANT" in
+    changed-parent)
+      mv "$HOME/.claude/skills/boxd-setup-deploy" "$HOME/saved-parent"
+      mkdir "$HOME/.claude/skills/boxd-setup-deploy"
+      cp "$HOME/saved-parent/SKILL.md" "$HOME/.claude/skills/boxd-setup-deploy/SKILL.md"
+      ln -s "$HOME/.codex/skills/boxd-setup-deploy" "$HOME/.claude/skills/boxd-setup-deploy/boxd-setup-deploy"
+      ;;
+    changed-root)
+      mv "$HOME/.codex/skills" "$HOME/saved-root"
+      mkdir "$HOME/.codex/skills"
+      for name in boxd-cli boxd-setup-deploy boxd-setup-golden boxd-setup-preview boxd-setup-fix boxd-setup-hermes; do
+        ln -s "$HOME/.claude/skills/$name" "$HOME/.codex/skills/$name"
+      done
+      ;;
+  esac
+else
+  printf 'injected unlink I/O error\n' >&2
+  exit 1
+fi
+STUB
+  chmod 755 "$case_root/bin/unlink"
+  code=0
+  HOME="$fixture_home" TEST_REAL_UNLINK="$real_unlink" TEST_VARIANT="$variant" PATH="$case_root/bin:$PATH" \
+    /bin/bash "$sync" --repair-nested-self-links -- "${names[@]}" >"$output" 2>&1 || code=$?
+  [ "$code" -ne 0 ] || fail 'partial failure reported success'
+  contains 'removed=1 already-absent=0'
+  case "$variant" in
+    io-error) contains 'unlink failed:' ;;
+    changed-parent) contains 'topology changed:' ;;
+    changed-root) contains 'root changed:' ;;
+  esac
+  [ ! -L "$claude/boxd-cli/boxd-cli" ] || fail 'first removal was rolled back'
+  for name in "${names[@]:1}"; do
+    [ -L "$claude/$name/$name" ] || fail 'removed a later candidate after failure'
+  done
+done
+printf 'revalidation and partial progress: PASS\n'
+
+new_case audit-identity
+base_fixture
+make_skill "$claude/direct"
+ln -s . "$claude/direct/direct"
+make_skill "$claude/.hidden"
+ln -s . "$claude/.hidden/.hidden"
+make_skill "$claude/healthy"
+ln -s "$agent" "$claude/healthy/healthy"
+ln -s "$claude/healthy" "$claude/alias"
+expect_rejected run_audit
+[ "$(rg -c 'reason=nested-self-link' "$output")" -eq 2 ] || fail 'audit identity detection'
+unlink "$claude/direct/direct"
+unlink "$claude/.hidden/.hidden"
+run_audit >"$output"
+contains 'status=current'
+printf 'bounded audit identity detection: PASS\n'
+
+new_case ordinary-sync
+base_fixture
+make_skill "$agent/winner"
+make_skill "$manager/winner"
+make_skill "$codex/winner"
+make_skill "$manager/manager-only"
+make_skill "$codex/local-only"
+make_skill "$agent/already-correct"
+ln -s "$agent/already-correct" "$claude/already-correct"
+snapshot "$claude/already-correct" >"$case_root/link-before"
+ln -s "$agent" "$claude/foreign"
+ln -s "$agent" "$claude/.foreign"
+ln -s "$fixture_home/missing" "$claude/broken"
+ln -s "$fixture_home/missing" "$claude/.broken"
+mkdir "$agent/stale"
+ln -s "$agent/stale" "$claude/stale"
+run_sync >"$output"
+contains 'skip winner (manager): name taken by'
+contains 'skip winner (codex-local): name taken by'
+[ "$(readlink "$claude/winner")" = "$agent/winner" ] || fail 'precedence'
+[ "$(readlink "$claude/manager-only")" = "$manager/manager-only" ] || fail 'manager mirror'
+[ "$(readlink "$claude/local-only")" = "$codex/local-only" ] || fail 'local mirror'
+[ -L "$claude/foreign" ] && [ -L "$claude/.foreign" ] || fail 'healthy foreign link pruned'
+for name in broken .broken stale; do [ ! -L "$claude/$name" ] || fail 'stale link not pruned'; done
+snapshot "$claude/already-correct" >"$case_root/link-after"
+cmp "$case_root/link-before" "$case_root/link-after" || fail 'healthy symlink recreated'
+snapshot "$fixture_home" >"$case_root/before"
+run_sync >"$output"
+contains 'skills mirror up to date'
+unchanged
+# Real files, real dirs and a FIFO must survive every ordinary link() call.
+make_skill "$agent/file-conflict"
+make_skill "$agent/dir-conflict"
+make_skill "$agent/fifo-conflict"
+printf 'keep file\n' >"$claude/file-conflict"
+make_skill "$claude/dir-conflict"
+mkfifo "$claude/fifo-conflict"
+unlink "$codex/agent-scripts"
+mkdir "$codex/agent-scripts"
+unlink "$codex/manager"
+printf 'keep root file\n' >"$codex/manager"
+unlink "$fixture_home/.codex/AGENTS.md"
+printf 'keep instructions\n' >"$fixture_home/.codex/AGENTS.md"
+expect_rejected run_sync
+contains 'skills mirror has 6 real destination conflict(s)'
+if rg -q 'skills mirror up to date|^link ' "$output"; then fail 'conflicts falsely reported linked/current'; fi
+printf 'ordinary sync ownership, conflicts and precedence: PASS\n'
+
+new_case broad-audit-repair
+base_fixture
+make_skill "$agent/mirrored"
+mkdir -p "$fixture_home/Projects/agent-scripts/scripts"
+cp "$sync" "$fixture_home/Projects/agent-scripts/scripts/sync-skills"
+chmod 755 "$fixture_home/Projects/agent-scripts/scripts/sync-skills"
+run_audit --repair >"$output"
+[ "$(readlink "$claude/mirrored")" = "$agent/mirrored" ] || fail 'broad repair did not use canonical fixture owner'
+contains 'status=current'
+printf 'canonical broad audit repair routing: PASS\n'
+printf 'sync-skills tests: ok (Bash %s)\n' "$BASH_VERSION"
