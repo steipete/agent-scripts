@@ -17,13 +17,13 @@ cat >"$TEST_ROOT/bin/npm" <<'EOF'
 set -euo pipefail
 test "$PWD" = "$EXPECTED_PWD"
 test "$NPM_CONFIG_USERCONFIG" = "$EXPECTED_NPMRC"
+test "$NPM_CONFIG_REGISTRY" = "https://registry.npmjs.org/"
 if env | grep -Fq 'npm_config_//registry.npmjs.org/:_authToken='; then
   echo "npm token leaked into environment" >&2
   exit 1
 fi
-test "$1" = "--registry"
-test "$2" = "https://registry.npmjs.org/"
-test "$3" = "whoami"
+test "$#" = "1"
+test "$1" = "whoami"
 printf 'steipete\n'
 EOF
 chmod +x "$TEST_ROOT/bin/npm"
