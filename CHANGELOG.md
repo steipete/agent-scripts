@@ -6,6 +6,8 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 ## Unreleased
 
+- Simplified requested agent transcripts and require scope trimming before previews or publication; helpers that rerender sessions cannot reuse approval of edited Markdown.
+
 - Set `codex-first` workers and Codex-backed reviews to GPT-6 Astra with high reasoning and Fast service, including fresh, resumed, and watchdog launches.
 
 - Removed the retired private launch-skill dependency from shared instructions and Claude routing; Codex workers now inherit saved model, reasoning, and service-tier defaults.
