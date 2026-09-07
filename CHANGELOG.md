@@ -6,6 +6,8 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 ## Unreleased
 
+- Run the Codex direct-route preflight regression suite in CI with a clean environment and temporary HOME, covering private-home auth delivery and secret-safe failures without live credentials.
+
 - Make Codex Keychain helper guidance independent of private reviewer HOME paths and add a secret-safe `--private-home` delivery diagnostic without changing reviewer isolation or provider selection.
 
 - Align shared Codex routing rules with the canonical `codex-first` skill and its launch recipe instead of stale saved-defaults guidance; preserve the model gate and isolated review workflow.
