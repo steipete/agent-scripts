@@ -6,8 +6,6 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 ## Unreleased
 
-- Fixed the markdown-converter skill's documented commands so PDF and Office conversions request the `markitdown[all]` extras instead of failing on missing optional dependencies.
-
 - Fixed false missing-asset errors when verifying macOS releases with long asset lists.
 
 - Route intentional Team restarts through one coordinator session on Stable, preserving explicit deployment approval and holding restarts while the coordinator is unidentified or unavailable.
