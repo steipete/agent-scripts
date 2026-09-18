@@ -1,0 +1,6 @@
+interface:
+  display_name: "Astra → Sol Delegation"
+  short_description: "Astra delegates to Sol with task-appropriate effort"
+  default_prompt: "Use $astra-sol-delegation to delegate suitable work to GPT-5.6 Sol, choosing the reasoning effort and reviewing the result as GPT-6 Astra."
+policy:
+  allow_implicit_invocation: true
