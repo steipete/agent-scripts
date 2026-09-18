@@ -5,20 +5,20 @@ description: "Markdown conversion: PDF, Office, HTML, data, OCR, audio, ZIP, You
 
 # Markdown Converter
 
-Convert files to Markdown using `uvx markitdown` — no installation required.
+Convert files to Markdown using `uvx --from "markitdown[all]" markitdown` — no installation required.
 
 ## Basic Usage
 
 ```bash
 # Convert to stdout
-uvx markitdown input.pdf
+uvx --from "markitdown[all]" markitdown input.pdf
 
 # Save to file
-uvx markitdown input.pdf -o output.md
-uvx markitdown input.docx > output.md
+uvx --from "markitdown[all]" markitdown input.pdf -o output.md
+uvx --from "markitdown[all]" markitdown input.docx > output.md
 
 # From stdin
-cat input.pdf | uvx markitdown
+cat input.pdf | uvx --from "markitdown[all]" markitdown
 ```
 
 ## Supported Formats
@@ -45,19 +45,19 @@ cat input.pdf | uvx markitdown
 
 ```bash
 # Convert Word document
-uvx markitdown report.docx -o report.md
+uvx --from "markitdown[all]" markitdown report.docx -o report.md
 
 # Convert Excel spreadsheet
-uvx markitdown data.xlsx > data.md
+uvx --from "markitdown[all]" markitdown data.xlsx > data.md
 
 # Convert PowerPoint presentation
-uvx markitdown slides.pptx -o slides.md
+uvx --from "markitdown[all]" markitdown slides.pptx -o slides.md
 
 # Convert with file type hint (for stdin)
-cat document | uvx markitdown -x .pdf > output.md
+cat document | uvx --from "markitdown[all]" markitdown -x .pdf > output.md
 
 # Use Azure Document Intelligence for better PDF extraction
-uvx markitdown scan.pdf -d -e "https://your-resource.cognitiveservices.azure.com/"
+uvx --from "markitdown[all]" markitdown scan.pdf -d -e "https://your-resource.cognitiveservices.azure.com/"
 ```
 
 ## Notes
@@ -65,3 +65,4 @@ uvx markitdown scan.pdf -d -e "https://your-resource.cognitiveservices.azure.com
 - Output preserves document structure: headings, tables, lists, links
 - First run caches dependencies; subsequent runs are faster
 - For complex PDFs with poor extraction, use `-d` with Azure Document Intelligence
+- If automatic charset detection picks the wrong encoding for a text file, pass `-c UTF-8` (or the known charset)
