@@ -6,6 +6,8 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 ## Unreleased
 
+- Correct Octopool calling guidance for native JSON bundles, pagination, caller-owned headers, exact-run CI verification, and sandbox coverage.
+
 - Guard Xcode installs with bounded Git/Python smoke checks and selected-bundle rollback; require a Git host preflight before Codex workers and document the stable-Xcode workaround.
 
 - Fixed false missing-asset errors when verifying macOS releases with long asset lists.
