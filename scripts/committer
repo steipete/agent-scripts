@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""
+committer.py — Commit aman: stage file eksplisit, pesan wajib, validasi dulu.
+
+Hasil adaptasi dari scripts/committer milik steipete/agent-scripts
+(https://github.com/steipete/agent-scripts, MIT) — di-port ke Python dan
+disesuaikan dengan alur kerja kita.
+
+Filosofi (sama seperti aslinya):
+  - TIDAK pernah `git add -A` / `git add .` — cuma file yang benar-benar disebut.
+    Ini mencegah commit sampah (file backup, .env, output cron, dsb) ikut masuk.
+  - Pesan commit WAJIB non-kosong.
+  - Validasi dijalankan DULU sebelum commit; gagal = batal.
+
+Usage:
+  committer.py -m "pesan commit" <file1> [file2 ...]
+  committer.py -m "pesan" --all-changed          # semua file yg sudah di-stage/diubah
+  committer.py -m "pesan" --skills <a> <b>       # shorthand: file di dalam kolam skill
+  committer.py -m "pesan" --dry-run <file...>    # cuma tampilkan rencana
+
+Opsi:
+  --repo DIR         repo target (default: cwd)
+  --skills DIR       root kolam skill (default: ~/.hermes/skills)
+  --skip-validate    lewati validasi skill (jarang dipakai)
+  --no-push          commit saja, jangan push
+  --allow-empty-msg  TIDAK disediakan — pesan wajib. Ini memang disengaja.
+
+Exit code: 0 = sukses, 1 = gagal, 2 = salah pemakaian.
+"""
+import argparse
+import os
+import subprocess
+import sys
+
+SKILL_VALIDATOR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "validate_skills.py")
+DEFAULT_SKILLS = os.environ.get("HERMES_SKILLS_ROOT",
+                                os.path.expanduser("~/.hermes/skills"))
+
+# Pola file yang TIDAK boleh ikut commit walau disebut (jaring pengaman)
+DENY_PATTERNS = (".env", ".env.", "credentials", "id_rsa", ".pem", ".key",
+                 ".bak-", ".bak.", "~")
+
+
+def run(cmd, cwd=None, check=True, capture=True):
+    r = subprocess.run(cmd, cwd=cwd, capture_output=capture, text=True)
+    if check and r.returncode != 0:
+        raise RuntimeError(
+            f"perintah gagal ({r.returncode}): {' '.join(cmd)}\n"
+            f"stdout: {r.stdout}\nstderr: {r.stderr}")
+    return r
+
+
+def in_repo(path):
+    try:
+        run(["git", "-C", path, "rev-parse", "--is-inside-work-tree"])
+        return True
+    except Exception:
+        return False
+
+
+def deny_check(files, repo):
+    """Tolak file yang kelihatan seperti rahasia."""
+    bad = []
+    for f in files:
+        base = os.path.basename(f)
+        if any(p in base for p in DENY_PATTERNS) or base.startswith(".env"):
+            bad.append(f)
+    return bad
+
+
+def changed_files(repo):
+    r = run(["git", "-C", repo, "diff", "--name-only", "HEAD"], check=False)
+    return [os.path.join(repo, p) for p in r.stdout.split() if p]
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Commit aman: stage eksplisit + pesan wajib + validasi dulu.")
+    ap.add_argument("files", nargs="*", help="file yang akan di-commit (eksplisit)")
+    ap.add_argument("-m", "--message", required=True, help="pesan commit (wajib)")
+    ap.add_argument("--repo", default=os.getcwd(), help="repo target (default: cwd)")
+    ap.add_argument("--skills", default=DEFAULT_SKILLS,
+                    help=f"root kolam skill (default: {DEFAULT_SKILLS})")
+    ap.add_argument("--all-changed", action="store_true",
+                    help="commit semua file yang berubah (hati-hati!)")
+    ap.add_argument("--skip-validate", action="store_true",
+                    help="lewati validasi skill")
+    ap.add_argument("--no-push", action="store_true", help="commit saja, tanpa push")
+    ap.add_argument("--dry-run", action="store_true", help="tampilkan rencana saja")
+    args = ap.parse_args()
+
+    repo = os.path.abspath(os.path.expanduser(args.repo))
+
+    # --- 1. pesan wajib ---
+    msg = (args.message or "").strip()
+    if not msg:
+        print("error: pesan commit wajib diisi dan tidak boleh kosong", file=sys.stderr)
+        return 2
+
+    # --- 2. repo valid? ---
+    if not in_repo(repo):
+        print(f"error: '{repo}' bukan git repository", file=sys.stderr)
+        return 2
+
+    # --- 3. tentukan file ---
+    files = list(args.files)
+    if args.all_changed:
+        files = changed_files(repo)
+        print(f"⚠️  --all-changed: {len(files)} file berubah ikut di-commit")
+    if not files:
+        print("error: tidak ada file yang disebut. Pakai --all-changed kalau memang mau semua.",
+              file=sys.stderr)
+        return 2
+
+    # normalisasi path relatif terhadap repo
+    norm = []
+    for f in files:
+        p = f if os.path.isabs(f) else os.path.join(repo, f)
+        p = os.path.abspath(p)
+        if not os.path.exists(p):
+            print(f"error: file tidak ada: {f}", file=sys.stderr)
+            return 1
+        norm.append(p)
+    files = sorted(set(norm))
+
+    # --- 4. jaring pengaman rahasia ---
+    bad = deny_check(files, repo)
+    if bad:
+        print("error: file berikut kelihatan berisi rahasia, DITOLAK:", file=sys.stderr)
+        for b in bad:
+            print(f"  - {os.path.relpath(b, repo)}", file=sys.stderr)
+        return 1
+
+    # --- 5. validasi skill (kalau ada yang tersentuh) ---
+    skills_touched = [f for f in files
+                      if os.path.abspath(args.skills) in os.path.abspath(f)]
+    if skills_touched and not args.skip_validate:
+        if os.path.exists(SKILL_VALIDATOR):
+            print(f"→ validasi skill ({len(skills_touched)} file tersentuh)...")
+            r = subprocess.run([sys.executable, SKILL_VALIDATOR, "--root", args.skills,
+                                "--quiet"], capture_output=True, text=True)
+            if r.returncode != 0:
+                print("error: validasi skill GAGAL — commit dibatalkan:", file=sys.stderr)
+                print(r.stderr or r.stdout, file=sys.stderr)
+                return 1
+            print("   validasi OK")
+        else:
+            print(f"⚠️  validator tidak ada di {SKILL_VALIDATOR} — dilewati")
+
+    # --- 6. tampilkan rencana ---
+    print(f"\nrepo   : {repo}")
+    print(f"pesan  : {msg}")
+    print(f"file   : {len(files)}")
+    for f in files:
+        print(f"   + {os.path.relpath(f, repo)}")
+
+    if args.dry_run:
+        print("\n(dry-run — tidak ada yang di-commit)")
+        return 0
+
+    # --- 7. stage EKSPLISIT (satu per satu, bukan -A) ---
+    for f in files:
+        r = run(["git", "-C", repo, "add", "--", f], check=False)
+        if r.returncode != 0:
+            print(f"error: gagal stage {f}: {r.stderr}", file=sys.stderr)
+            return 1
+
+    # --- 8. commit ---
+    r = run(["git", "-C", repo, "commit", "-m", msg], check=False)
+    if r.returncode != 0:
+        print(f"error: commit gagal:\n{r.stdout}\n{r.stderr}", file=sys.stderr)
+        return 1
+    print(r.stdout.strip())
+
+    # --- 9. push ---
+    if not args.no_push:
+        r = run(["git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD"], check=False)
+        branch = r.stdout.strip()
+        if branch and branch not in ("HEAD", ""):
+            r = run(["git", "-C", repo, "push", "origin", branch], check=False)
+            if r.returncode != 0:
+                print(f"⚠️  commit OK tapi push gagal:\n{r.stderr}", file=sys.stderr)
+                return 1
+            print(f"→ pushed ke origin/{branch}")
+        else:
+            print("⚠️  detached HEAD — push dilewati")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

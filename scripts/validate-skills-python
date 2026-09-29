@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""
+validate_skills.py — Validator SKILL.md untuk kolam skill bersama.
+
+Hasil adaptasi dari scripts/validate-skills milik steipete/agent-scripts
+(https://github.com/steipete/agent-scripts, MIT) — di-port dari Ruby ke Python
+dan disesuaikan dengan struktur kita yang multi-kategori bersarang
+(: <kategori>/[<subkategori>/]<skill>/SKILL.md), bukan flat skills/*/.
+
+Yang diperiksa per SKILL.md:
+  1. Front matter ada, mulai di baris 1, ditutup '---', dan valid YAML mapping
+  2. field 'name'  : string non-kosong
+  3. field 'description': string non-kosong
+  4. 'name' duplikat lintas skill (mengindikasikan salinan ganda / skill kembar)
+  5. Anti-pola: `gh secret set ... --body -` (harus baca stdin tanpa --body)
+
+Usage:
+  validate_skills.py [--root DIR] [--quiet] [--json] [--only-changed]
+  validate_skills.py --help
+
+Exit code: 0 = lolos, 1 = ada error, 2 = salah pemakaian.
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+
+DEFAULT_ROOT = os.environ.get("HERMES_SKILLS_ROOT", os.path.expanduser("~/.hermes/skills"))
+SKIP_DIRS = {".archive", ".git", "__pycache__", "node_modules"}
+
+# Front matter: wajib mulai baris 1, ditutup --- di baris sendiri
+FM_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
+
+# gh secret set ... --body -  (harus baca stdin, jangan pakai --body -)
+GH_SECRET_BODY_DASH = re.compile(
+    r"\bgh[ \t]+secret[ \t]+set\b[^;\r\n|&]{0,500}?--body[ \t]+-(?=$|[\s`'\";|&)\\]])"
+)
+
+try:
+    import yaml  # PyYAML
+    HAVE_YAML = True
+except ImportError:
+    HAVE_YAML = False
+
+
+def find_skill_files(root):
+    """Kumpulkan semua SKILL.md, lewati dir yang di-skip."""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        if "SKILL.md" in filenames:
+            out.append(os.path.join(dirpath, "SKILL.md"))
+    return sorted(out)
+
+
+def load_front_matter(text):
+    """Kembalikan (dict, None) atau (None, pesan_error)."""
+    m = FM_RE.match(text)
+    if not m:
+        return None, "front matter must start on the first line and close with ---"
+    raw = m.group(1)
+    if HAVE_YAML:
+        try:
+            data = yaml.safe_load(raw)
+        except yaml.YAMLError as e:
+            return None, f"YAML: {e}"
+    else:
+        # fallback parser minimal (tanpa PyYAML): key: value satu baris
+        data = {}
+        for line in raw.splitlines():
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if re.match(r"^[ \t]", line):  # lanjutan/nested — lewati
+                continue
+            mm = re.match(r"^([A-Za-z0-9_.-]+):[ \t]*(.*)$", line)
+            if mm:
+                data[mm.group(1)] = mm.group(2)
+    if not isinstance(data, dict):
+        return None, "front matter must be a YAML mapping"
+    return data, None
+
+
+def gh_secret_body_dash_line(text):
+    """Cari baris yang melanggar aturan gh secret set --body -."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if GH_SECRET_BODY_DASH.search(line):
+            return i + 1
+    for i in range(len(lines) - 1):
+        merged = lines[i] + " " + lines[i + 1]
+        m = GH_SECRET_BODY_DASH.search(merged)
+        if m and m.start() < len(lines[i]) < m.end():
+            return i + 1
+    return None
+
+
+def is_placeholder_desc(desc):
+    """Deteksi description '|' / '>' (multiline YAML yang gagal ke-parse)."""
+    d = (desc or "").strip().strip("\"'").strip()
+    return d in ("", "|", ">", "|-", ">-", "|+", ">+")
+
+
+def validate(root, only_changed=False):
+    files = find_skill_files(root)
+    changed = None
+    if only_changed:
+        try:
+            r = subprocess.run(
+                ["git", "-C", root, "diff", "--name-only", "HEAD"],
+                capture_output=True, text=True, timeout=20,
+            )
+            if r.returncode == 0:
+                changed = {os.path.join(root, p) for p in r.stdout.split() if p}
+        except Exception:
+            changed = None
+
+    errors = []
+    names = {}
+    checked = 0
+
+    for path in files:
+        if changed is not None and path not in changed:
+            continue
+        checked += 1
+        rel = os.path.relpath(path, root)
+        try:
+            text = open(path, encoding="utf-8", errors="replace").read()
+        except OSError as e:
+            errors.append((rel, f"cannot read: {e}"))
+            continue
+
+        bad = gh_secret_body_dash_line(text)
+        if bad:
+            errors.append((rel, f"line {bad}: `gh secret set` must read stdin by "
+                                 "omitting `--body`; never use `--body -`"))
+
+        data, err = load_front_matter(text)
+        if err:
+            errors.append((rel, err))
+            continue
+
+        for field in ("name", "description"):
+            val = data.get(field)
+            if not (isinstance(val, str) and val.strip()):
+                # bedakan: ada tapi pipeline-char (rusak) vs benar-benar kosong
+                if field == "description" and is_placeholder_desc(
+                        data.get("description") if isinstance(data.get("description"), str) else None):
+                    errors.append((rel, "description is a YAML block scalar that "
+                                        "did not parse (use a quoted single line)"))
+                else:
+                    errors.append((rel, f"missing non-empty string field: {field}"))
+
+        name = data.get("name")
+        if isinstance(name, str) and name.strip():
+            n = name.strip()
+            if n in names:
+                errors.append((rel, f"duplicate skill name {n!r} also used by {names[n]}"))
+            else:
+                names[n] = rel
+
+    return checked, len(files), errors
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Validate SKILL.md front matter (ported from steipete/agent-scripts).")
+    ap.add_argument("--root", default=DEFAULT_ROOT,
+                    help=f"root kolam skill (default: {DEFAULT_ROOT})")
+    ap.add_argument("--only-changed", action="store_true",
+                    help="hanya periksa file yang berubah (git diff HEAD)")
+    ap.add_argument("--json", action="store_true", help="keluarkan hasil sebagai JSON")
+    ap.add_argument("--quiet", action="store_true", help="hanya cetak saat gagal")
+    args = ap.parse_args()
+
+    root = os.path.abspath(os.path.expanduser(args.root))
+    if not os.path.isdir(root):
+        print(f"error: root tidak ditemukan: {root}", file=sys.stderr)
+        return 2
+
+    checked, total, errors = validate(root, args.only_changed)
+
+    if args.json:
+        print(json.dumps({
+            "root": root, "total_found": total, "checked": checked,
+            "errors": [{"file": f, "error": e} for f, e in errors],
+            "ok": not errors, "yaml_lib": HAVE_YAML,
+        }, indent=1))
+        return 0 if not errors else 1
+
+    if total == 0:
+        print(f"Tidak ada SKILL.md ditemukan di {root}", file=sys.stderr)
+        return 0
+
+    if errors:
+        print("Skill validation FAILED:", file=sys.stderr)
+        for f, e in errors:
+            print(f"- {f}: {e}", file=sys.stderr)
+        return 1
+
+    if not args.quiet:
+        note = "" if HAVE_YAML else "  (PyYAML tidak ada — pakai parser fallback)"
+        print(f"Validated {checked} skill(s) — OK{note}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# pre-commit: validasi SKILL.md sebelum commit (adaptasi steipete/agent-scripts).
+# Pasang dengan: git config core.hooksPath /opt/data/scripts/hooks
+set -euo pipefail
+SKILLS_ROOT="${HERMES_SKILLS_ROOT:-$HOME/.hermes/skills}"
+exec python3 /opt/data/scripts/validate_skills.py --root "$SKILLS_ROOT" --quiet
