@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""
+validate-skills (Python port) — validate SKILL.md front matter.
+
+Why this exists
+---------------
+The original `scripts/validate-skills` is Ruby. Ruby is not installed on every
+machine (notably Linux servers / CI images that only ship Python), so the
+pre-commit hook silently cannot run there. This is a dependency-light Python
+port that behaves the same where it matters and adds one check that matters
+for large skill pools.
+
+Behavioral parity with the Ruby version
+---------------------------------------
+  * front matter must start on line 1 and close with `---`
+  * front matter must parse as a YAML mapping
+  * `name` and `description` must be non-empty strings
+  * duplicate `name` across skills is an error  (NEW: cross-directory, see below)
+  * `gh secret set ... --body -` is rejected (must read stdin)
+
+Differences from the Ruby version
+---------------------------------
+  * Discovery is recursive instead of `skills/*/SKILL.md`. Pools that nest
+    skills by category (`<category>/[<subcategory>/]<skill>/SKILL.md`) are
+    common, and the flat glob silently validates nothing there.
+  * Duplicate `name` detection is global. `name` is the routing key, so two
+    skills sharing one name is a routing collision regardless of directory.
+  * A `description` that is a YAML block scalar (`|`) which failed to parse is
+    reported specifically, instead of as a generic "missing description".
+
+Usage
+-----
+    scripts/validate-skills-py [--root DIR] [--only-changed] [--json] [--quiet]
+
+    --root DIR       skill pool root (default: $HERMES_SKILLS_ROOT or ./skills)
+    --only-changed   only check files changed vs HEAD (fast pre-commit mode)
+    --json           machine-readable output
+    --quiet          print nothing unless something fails
+
+Exit codes: 0 = pass, 1 = errors found, 2 = bad usage.
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+
+DEFAULT_ROOT = os.environ.get("SKILLS_ROOT", "skills")
+SKIP_DIRS = {".archive", ".git", "__pycache__", "node_modules", ".curator_backups"}
+
+FM_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
+
+GH_SECRET_BODY_DASH = re.compile(
+    r"\bgh[ \t]+secret[ \t]+set\b[^;\r\n|&]{0,500}?--body[ \t]+-(?=$|[\s`'\";|&)\\]])"
+)
+
+try:
+    import yaml
+    HAVE_YAML = True
+except ImportError:
+    HAVE_YAML = False
+
+
+def find_skill_files(root):
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        if "SKILL.md" in filenames:
+            out.append(os.path.join(dirpath, "SKILL.md"))
+    return sorted(out)
+
+
+def load_front_matter(text):
+    m = FM_RE.match(text)
+    if not m:
+        return None, "front matter must start on the first line and close with ---"
+    raw = m.group(1)
+    if HAVE_YAML:
+        try:
+            data = yaml.safe_load(raw)
+        except yaml.YAMLError as e:
+            return None, f"YAML: {e}"
+    else:
+        data = {}
+        for line in raw.splitlines():
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if re.match(r"^[ \t]", line):
+                continue
+            mm = re.match(r"^([A-Za-z0-9_.-]+):[ \t]*(.*)$", line)
+            if mm:
+                data[mm.group(1)] = mm.group(2)
+    if not isinstance(data, dict):
+        return None, "front matter must be a YAML mapping"
+    return data, None
+
+
+def gh_secret_body_dash_line(text):
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if GH_SECRET_BODY_DASH.search(line):
+            return i + 1
+    for i in range(len(lines) - 1):
+        merged = lines[i] + " " + lines[i + 1]
+        m = GH_SECRET_BODY_DASH.search(merged)
+        if m and m.start() < len(lines[i]) < m.end():
+            return i + 1
+    return None
+
+
+def is_block_scalar(val):
+    return isinstance(val, str) and val.strip() in ("|", ">", "|-", ">-", "|+", ">+")
+
+
+def validate(root, only_changed=False):
+    files = find_skill_files(root)
+    changed = None
+    if only_changed:
+        try:
+            r = subprocess.run(["git", "-C", root, "diff", "--name-only", "HEAD"],
+                               capture_output=True, text=True, timeout=20)
+            if r.returncode == 0:
+                changed = {os.path.join(root, p) for p in r.stdout.split() if p}
+        except Exception:
+            changed = None
+
+    errors, names, checked = [], {}, 0
+    for path in files:
+        if changed is not None and path not in changed:
+            continue
+        checked += 1
+        rel = os.path.relpath(path, root)
+        try:
+            text = open(path, encoding="utf-8", errors="replace").read()
+        except OSError as e:
+            errors.append((rel, f"cannot read: {e}"))
+            continue
+
+        bad = gh_secret_body_dash_line(text)
+        if bad:
+            errors.append((rel, f"line {bad}: `gh secret set` must read stdin by "
+                                 "omitting `--body`; never use `--body -`"))
+
+        data, err = load_front_matter(text)
+        if err:
+            errors.append((rel, err))
+            continue
+
+        for field in ("name", "description"):
+            val = data.get(field)
+            if isinstance(val, str) and val.strip():
+                continue
+            if field == "description" and is_block_scalar(data.get(field)):
+                errors.append((rel, "description is a YAML block scalar that did not "
+                                    "parse — quote it on a single line"))
+            else:
+                errors.append((rel, f"missing non-empty string field: {field}"))
+
+        name = data.get("name")
+        if isinstance(name, str) and name.strip():
+            n = name.strip()
+            if n in names:
+                errors.append((rel, f"duplicate skill name {n!r} also used by {names[n]}"))
+            else:
+                names[n] = rel
+
+    return checked, len(files), errors
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Validate SKILL.md front matter.")
+    ap.add_argument("--root", default=DEFAULT_ROOT)
+    ap.add_argument("--only-changed", action="store_true")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--quiet", action="store_true")
+    args = ap.parse_args()
+
+    root = os.path.abspath(os.path.expanduser(args.root))
+    if not os.path.isdir(root):
+        print(f"error: root not found: {root}", file=sys.stderr)
+        return 2
+
+    checked, total, errors = validate(root, args.only_changed)
+
+    if args.json:
+        print(json.dumps({"root": root, "total_found": total, "checked": checked,
+                          "ok": not errors,
+                          "errors": [{"file": f, "error": e} for f, e in errors]},
+                         indent=1))
+        return 0 if not errors else 1
+
+    if total == 0:
+        print(f"No SKILL.md found under {root}", file=sys.stderr)
+        return 0
+
+    if errors:
+        print("Skill validation failed:", file=sys.stderr)
+        for f, e in errors:
+            print(f"- {f}: {e}", file=sys.stderr)
+        return 1
+
+    if not args.quiet:
+        print(f"Validated {checked} skill(s).")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
