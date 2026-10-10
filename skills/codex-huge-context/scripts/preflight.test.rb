@@ -9,7 +9,7 @@ require "shellwords"
 require "tmpdir"
 
 SCRIPT = File.expand_path("preflight.rb", __dir__)
-MODELS = %w[gpt-5.6-sol gpt-5.6-terra gpt-5.6-luna gpt-6-astra].freeze
+MODELS = %w[gpt-5.6-sol gpt-5.6-terra gpt-5.6-luna gpt-6-astra gpt-6.1-sol].freeze
 CONTEXT_WINDOW = 922_000
 AUTO_COMPACT_TOKEN_LIMIT = 700_000
 OUTPUT_SENTINEL = "fixture-output-must-not-appear"
@@ -187,7 +187,7 @@ end
   end
 end
 
-%w[gpt-5.6-luna gpt-6-astra].each do |missing_model|
+MODELS.each do |missing_model|
   Dir.mktmpdir("codex-huge-context-test") do |root|
     config = write_fixture(
       root,
