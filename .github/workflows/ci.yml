@@ -75,8 +75,9 @@ jobs:
 
       - name: Test image output safety (offline, synthetic)
         run: |
-          python3 -m pip install 'pillow>=10.0.0'
-          python3 -m unittest discover -s skills/nano-banana-pro/scripts -p 'test_*.py'
+          python3 -m venv "$RUNNER_TEMP/image-tests"
+          "$RUNNER_TEMP/image-tests/bin/python" -m pip install 'pillow>=10.0.0'
+          "$RUNNER_TEMP/image-tests/bin/python" -m unittest discover -s skills/nano-banana-pro/scripts -p 'test_*.py'
 
       - name: Build browser helper
         run: |
