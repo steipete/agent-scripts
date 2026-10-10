@@ -116,8 +116,11 @@ Use templates when the user is vague or when edits must be precise.
 ## Output
 
 - Saves PNG to current directory (or specified path if filename includes directory)
+- Requires a new filename: existing files, hard links, and symlinks are rejected. Parent directories are created as needed, but symlinked path components are rejected; use their real directory paths instead. Absolute paths and paths outside the current directory remain supported on macOS and Linux.
 - Script outputs the full path to the generated image
 - **Do not read the image back** - just inform the user of the saved path
+
+Offline output-safety regression tests (Pillow required): `python3 -m unittest discover -s skills/nano-banana-pro/scripts -p 'test_*.py'` from the repository root.
 
 ## Examples
 

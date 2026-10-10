@@ -6,6 +6,8 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 ## Unreleased
 
+- Prevent Nano Banana image outputs from following symlinks or overwriting existing files, including through raced parent paths; retain explicit output directories. Thanks @DillyRabbit! (#46)
+
 - Keep the Codex preflight test catalogue aligned with supported models and verify that every required catalogue entry is enforced.
 
 - Default `codex-first` workers and autoreviews to GPT-6.1 Sol with high reasoning on the Ultrafast tier (Fast is now the opt-in); add 6.1 Sol to the `codex-huge-context` catalogue policy and preflight.

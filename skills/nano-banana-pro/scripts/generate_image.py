@@ -16,6 +16,7 @@ Usage:
 import argparse
 import os
 import sys
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 
@@ -39,6 +40,40 @@ def normalize_resolution(value: str) -> str:
     return normalized
 
 
+@contextmanager
+def create_output(path: Path):
+    """Create a new output without following leaf or parent symlinks."""
+    if not path.name or path.name == "..":
+        raise ValueError("Output must name a new file")
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        raise OSError("Safe image output requires POSIX directory handles")
+
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    with ExitStack() as stack:
+        directory = os.open(path.anchor or ".", directory_flags)
+        stack.callback(os.close, directory)
+        parents = path.parts[1:-1] if path.is_absolute() else path.parts[:-1]
+        for component in parents:
+            try:
+                child = os.open(component, directory_flags, dir_fd=directory)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(component, dir_fd=directory)
+                except FileExistsError:
+                    pass
+                child = os.open(component, directory_flags, dir_fd=directory)
+            stack.callback(os.close, child)
+            directory = child
+
+        # Exclusive creation rejects existing files, hard links and dangling links.
+        descriptor = os.open(
+            path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o666, dir_fd=directory,
+        )
+        with os.fdopen(descriptor, "wb") as output:
+            yield output
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate images using Nano Banana 2 (Gemini 3.1 Flash Image)"
@@ -51,7 +86,7 @@ def main():
     parser.add_argument(
         "--filename", "-f",
         required=True,
-        help="Output filename (e.g., sunset-mountains.png)"
+        help="New output filename; existing files and symlink paths are rejected"
     )
     parser.add_argument(
         "--input-image", "-i",
@@ -90,7 +125,6 @@ def main():
 
     # Set up output path
     output_path = Path(args.filename)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Load input image if provided
     input_image = None
@@ -137,7 +171,7 @@ def main():
         )
 
         # Process response and convert to PNG
-        image_saved = False
+        output_image = None
         for part in response.parts:
             if part.text is not None:
                 print(f"Model response: {part.text}")
@@ -158,15 +192,16 @@ def main():
                 if image.mode == 'RGBA':
                     rgb_image = PILImage.new('RGB', image.size, (255, 255, 255))
                     rgb_image.paste(image, mask=image.split()[3])
-                    rgb_image.save(str(output_path), 'PNG')
+                    output_image = rgb_image
                 elif image.mode == 'RGB':
-                    image.save(str(output_path), 'PNG')
+                    output_image = image
                 else:
-                    image.convert('RGB').save(str(output_path), 'PNG')
-                image_saved = True
+                    output_image = image.convert('RGB')
 
-        if image_saved:
-            full_path = output_path.resolve()
+        if output_image is not None:
+            with create_output(output_path) as output:
+                output_image.save(output, 'PNG')
+            full_path = output_path.absolute()
             print(f"\nImage saved: {full_path}")
         else:
             print("Error: No image was generated in the response.", file=sys.stderr)
