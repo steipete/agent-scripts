@@ -4,6 +4,6 @@
   "type": "module",
   "dependencies": {
     "commander": "^15.0.0",
-    "puppeteer-core": "^25.12.0"
+    "puppeteer-core": "^25.13.0"
   }
 }

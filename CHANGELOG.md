@@ -6,6 +6,8 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 ## Unreleased
 
+- Update Puppeteer Core to 25.13.0 with its matching browser protocol dependencies; keep the Node.js runtime floor unchanged.
+
 - Prevent Nano Banana image outputs from following symlinks or overwriting existing files, including through raced parent paths; retain explicit output directories. Thanks @DillyRabbit! (#46)
 
 - Keep the Codex preflight test catalogue aligned with supported models and verify that every required catalogue entry is enforced.
