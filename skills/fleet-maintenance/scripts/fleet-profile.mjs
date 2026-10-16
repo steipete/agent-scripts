@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { adminMembership } from "./admin-membership.mjs";
 
 function fail(message) {
   process.stderr.write(`fleet-profile: ${message}\n`);
@@ -123,7 +124,11 @@ function collectAccounts() {
     const match = row.match(/^(.*?)\s+(\d+)$/);
     if (!match || Number(match[2]) < 500) continue;
     const username = match[1];
-    const adminCheck = run("/usr/sbin/dseditgroup", ["-o", "checkmember", "-m", username, "admin"]);
+    const adminResult = spawnSync("/usr/sbin/dseditgroup", ["-o", "checkmember", "-m", username, "admin"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const admin = adminMembership(adminResult);
     const tokenResult = spawnSync("/usr/sbin/sysadminctl", ["-secureTokenStatus", username], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -132,7 +137,7 @@ function collectAccounts() {
     accounts.push({
       username,
       uid: Number(match[2]),
-      admin: /yes/i.test(adminCheck),
+      admin,
       filevault_unlock: fileVaultListReadable ? fileVaultUsers.has(username) : null,
       secure_token: /enabled/i.test(tokenCheck) ? "enabled" : /disabled/i.test(tokenCheck) ? "disabled" : "unknown",
     });

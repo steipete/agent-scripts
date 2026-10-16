@@ -54,6 +54,7 @@ jobs:
           trap 'rm -rf "$test_home"' EXIT
           timeout 60s env -i HOME="$test_home" PATH="$PATH" node --test skills/npm/scripts/*.test.mjs </dev/null
           timeout 30s env -i HOME="$test_home" PATH="$PATH" /bin/bash skills/npm/scripts/npm-auth.test.sh </dev/null
+          timeout 60s env -i HOME="$test_home" PATH="$PATH" /bin/bash skills/npm/scripts/publish-package.test.sh </dev/null
 
       - name: Test Codex context and private-home auth preflight (offline, synthetic)
         run: |
@@ -73,6 +74,14 @@ jobs:
       - name: Test maintainer orchestrator worker boundary
         run: scripts/test-maintainer-orchestrator-policy
 
+      - name: Test relay doctor and fleet membership (offline, synthetic)
+        run: |
+          python3 skills/openclaw-relay/scripts/test_doctor_token.py
+          node --test skills/fleet-maintenance/scripts/fleet-profile.test.mjs
+
+      - name: Test Swift project scanner
+        run: node skills/project-structure/selftest.mjs --swift-only
+
       - name: Test image output safety (offline, synthetic)
         run: |
           python3 -m venv "$RUNNER_TEMP/image-tests"
@@ -82,7 +91,7 @@ jobs:
       - name: Build browser helper
         run: |
           bun install --frozen-lockfile
-          bun test scripts/browser-tools-profile.test.ts
+          bun test scripts/browser-tools-profile.test.ts scripts/browser-tools-navigation.test.ts
           bun build scripts/browser-tools.ts --compile --target bun --outfile /tmp/browser-tools
           /tmp/browser-tools --help
 
@@ -95,3 +104,4 @@ jobs:
         run: |
           node -e "import('youtube-transcript-plus').then(m => { if (typeof m.YoutubeTranscript?.fetchTranscript !== 'function') process.exit(1); })"
           ./scripts/vtd.js transcript --help
+          node --test scripts/vtd.test.mjs

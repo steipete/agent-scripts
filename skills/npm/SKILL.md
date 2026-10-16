@@ -35,7 +35,7 @@ From the package root, inside the same auth tmux window:
 /Users/steipete/Projects/agent-scripts/skills/npm/scripts/publish-package.sh
 ```
 
-The helper verifies identity, refuses an existing package version, publishes with a fresh OTP, retries one expired OTP, verifies registry visibility, and cleans auth files.
+The helper verifies identity, refuses an existing package version, publishes with a fresh OTP, retries one expired OTP, verifies registry visibility with the same temporary npmrc (including restricted packages), and cleans auth files.
 
 ## Package Reservation
 

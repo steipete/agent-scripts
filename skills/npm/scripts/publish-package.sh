@@ -66,6 +66,8 @@ trap cleanup EXIT
 
 name="$(node -p 'require("./package.json").name')"
 version="$(node -p 'require("./package.json").version')"
+# Public packages are visible without credentials, so this avoids 1Password
+# when the version is already on the public registry.
 if npm view "$name@$version" version >/dev/null 2>&1; then
   echo "$name@$version is already published" >&2
   exit 5
@@ -86,6 +88,12 @@ if [ -z "$who" ]; then
 fi
 echo "npm auth ok as $who"
 
+# Restricted packages are invisible to the anonymous view above.
+if npm_authenticated view "$name@$version" version >/dev/null 2>&1; then
+  echo "$name@$version is already published" >&2
+  exit 5
+fi
+
 publish_log="$WORK/npm-publish.log"
 otp="$(fresh_command_otp)"
 if ! NPM_CONFIG_OTP="$otp" npm_authenticated publish "$PACKAGE_DIR" --access "$ACCESS" --tag "$TAG" >"$publish_log" 2>&1; then
@@ -105,7 +113,7 @@ fi
 redact <"$publish_log"
 
 for _ in {1..12}; do
-  published="$(npm view "$name@$version" version 2>/dev/null || true)"
+  published="$(npm_authenticated view "$name@$version" version 2>/dev/null || true)"
   if [ "$published" = "$version" ]; then
     echo "registry version verified: $name@$published"
     exit 0

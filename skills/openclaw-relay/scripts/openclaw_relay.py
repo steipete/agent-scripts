@@ -519,7 +519,9 @@ def read_text_arg(args: argparse.Namespace) -> str:
 def cmd_doctor(args: argparse.Namespace) -> None:
     if args.transport == "local":
         acpx_repo = Path(args.acpx_repo)
-        ready = acpx_repo.is_dir() and Path(args.cwd, ".acpxrc.json").is_file() and Path(args.gateway_token_file).is_file()
+        token_file = args.gateway_token_file
+        token_ready = bool(token_file) and Path(token_file).is_file()
+        ready = acpx_repo.is_dir() and Path(args.cwd, ".acpxrc.json").is_file() and token_ready
         version_proc = run_acpx(args, ["--version"], check=False)
         status_proc = run_acpx(
             args,

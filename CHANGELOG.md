@@ -6,6 +6,14 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 ## Unreleased
 
+- Fail browser content/search navigation errors without extracting stale pages; retain loaded documents after network-idle timeouts. Thanks @SebTardif! (#49)
+- Verify restricted npm package versions with the temporary authenticated npmrc before and after publishing. Thanks @SebTardif! (#50)
+- Report missing relay gateway token files without crashing local doctor. Thanks @SebTardif! (#51)
+- Preserve malformed out-of-range caption entities instead of aborting transcript decoding. Thanks @SebTardif! (#52)
+- Record failed fleet admin membership checks as unknown instead of non-admin. Thanks @SebTardif! (#53)
+- Scan leading Swift attributes without exponential backtracking; cover malformed input with a bounded regression test. Thanks @SebTardif! (#54)
+- Update Puppeteer Core to 25.14.0, retaining the existing Node.js runtime floor.
+
 - Route personal Gateway checks through the verified native installation and update owner; preserve legacy service custody until supported takeover is complete.
 
 - Global `fix ci` rule: rerun only the failed tests/checks locally and push fixes once; `gh run rerun --failed` only for diagnosed infra/flaky failures, never to chase green.

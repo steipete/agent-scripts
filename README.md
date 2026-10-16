@@ -94,6 +94,7 @@ Repo-specific rules go below that pointer. Do not copy the shared blocks into do
 
 `scripts/browser-tools.ts`
 - Standalone Chrome DevTools helper.
+- `content` and `search` fail on navigation errors; a loaded article remains readable when only network idle times out. Individual `search --content` failures are reported per result.
 - Common commands: `start --profile`, `nav <url>`, `eval '<js>'`, `screenshot`, `console`, `network`, `search --content "<query>"`, `content <url>`, `inspect`, `kill --all --force`.
 - Build optional binary with `bun build scripts/browser-tools.ts --compile --target bun --outfile bin/browser-tools`.
 

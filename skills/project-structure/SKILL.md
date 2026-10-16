@@ -66,4 +66,4 @@ Swift (reference: Peekaboo, 1,122 source files after test exclusion; byte/4 esti
 - Feeding codex CLI: turn input hard-caps at 1,048,576 chars (~260k tokens); pipe the map via stdin. Bigger maps need a direct Responses API call ($codex-huge-context) or a model with a larger window.
 - Do not bother with dictionary/abbreviation compression: measured on openclaw, total possible savings were 292 tokens (0.15%) — BPE already compresses repeated identifiers.
 - Map findings are leads, not verdicts: spot-verify file paths and claims with grep before acting on any model analysis of a map.
-- `node selftest.mjs` (in this skill dir) diffs the mapper against checked-in fixtures for both languages — run it after editing `map.ts`.
+- `node selftest.mjs` (or `node selftest.mjs --swift-only` without TypeScript installed, in this skill dir) diffs the mapper against checked-in fixtures for both languages — run it after editing `map.ts`.

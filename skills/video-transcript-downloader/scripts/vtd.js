@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { YoutubeTranscript } from "youtube-transcript-plus";
+import { decodeHtmlEntities } from "./html-entities.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -92,26 +93,6 @@ function extractYouTubeId(input) {
   if (/^[a-zA-Z0-9_-]{11}$/.test(raw)) return raw;
   const m = raw.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
   return m ? m[1] : null;
-}
-
-function decodeHtmlEntities(input) {
-  if (!input) return input;
-  // Some transcripts come back double-encoded (e.g. "&amp;#39;").
-  // Decode up to 2 passes; stop once stable.
-  let text = input;
-  for (let i = 0; i < 2; i++) {
-    const decoded = text
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&apos;/g, "'")
-      .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
-      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)));
-    if (decoded === text) break;
-    text = decoded;
-  }
-  return text;
 }
 
 function formatTimestamp(seconds) {

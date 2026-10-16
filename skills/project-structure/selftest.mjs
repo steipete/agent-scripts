@@ -3,7 +3,7 @@
 // against fixtures/expected/. Dependency-free; each fixture dir holds ONE file so output
 // order never depends on readdir order.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -21,7 +21,7 @@ const CHECKS = [
   // Single file via nested include: skeleton blocks follow walk order, which is
   // filesystem-dependent across multiple files.
   ['swift-skeleton', ['--include', 'swift/visibility', '--mode', 'skeleton']],
-];
+].filter(([name]) => !process.argv.includes('--swift-only') || name.startsWith('swift-'));
 
 let failed = 0;
 for (const [name, flags] of CHECKS) {
@@ -45,10 +45,23 @@ for (const [name, flags] of CHECKS) {
     }
   }
 }
+const hostileDir = join(workDir, 'hostile');
+mkdirSync(hostileDir);
+writeFileSync(join(hostileDir, 'Hostile.swift'), `${'  @.'.repeat(40)}\n@MainActor public func kept() {}\n`);
+const hostileOut = join(workDir, 'hostile.txt');
+try {
+  execFileSync(process.execPath, [...process.execArgv, mapTs, hostileDir, '--out', hostileOut], {
+    stdio: ['ignore', 'ignore', 'inherit'], timeout: 10000,
+  });
+  if (!readFileSync(hostileOut, 'utf8').includes('kept')) throw new Error('missing attributed function');
+} catch (error) {
+  failed++;
+  console.error(`FAIL hostile Swift input: ${error.message}`);
+}
 rmSync(workDir, { recursive: true, force: true });
 
 if (failed > 0) {
-  console.error(`selftest FAILED (${failed}/${CHECKS.length} checks)`);
+  console.error(`selftest FAILED (${failed}/${CHECKS.length + 1} checks)`);
   process.exit(1);
 }
-console.log(`selftest OK (${CHECKS.length} checks)`);
+console.log(`selftest OK (${CHECKS.length + 1} checks)`);

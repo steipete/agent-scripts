@@ -435,10 +435,46 @@ function maskSwiftNonCode(source: string): string {
   return out;
 }
 
-// Attributes are matched structurally (name + optional generic args + one paren-nesting level)
-// rather than greedily: a greedy @-prefix can swallow `func f() {` on a one-line declaration
-// and mis-emit a symbol from the body instead.
-const SWIFT_DECL = /^(?:\s*@[\w.]+(?:<[^>\n]*>)?(?:\((?:[^()\n]|\([^()\n]*\))*\))?\s+)*(\s*(?:(?:open|public|package|internal|private|fileprivate|(?:public|package|internal|private|fileprivate)\(set\)|final|indirect|nonisolated(?:\([^)]*\))?|static|class|override|required|convenience|mutating|nonmutating|prefix|postfix|infix|lazy|weak|unowned(?:\((?:safe|unsafe)\))?|dynamic|distributed|optional|borrowing|consuming)\s+)*)(func|class|struct|enum|protocol|extension|typealias|actor|macro|let|var)\b(.*)$/u;
+// Leading attributes are removed by a linear scan. Keeping them in SWIFT_DECL makes
+// `  @.` repeat until the matcher backtracks for seconds and never finds a declaration.
+function stripSwiftLeadingAttributes(line: string): string {
+  let i = 0;
+  const len = line.length;
+  while (i < len) {
+    let j = i;
+    while (j < len && (line[j] === ' ' || line[j] === '\t')) j++;
+    if (line[j] !== '@') return line.slice(i);
+    j++;
+    if (j >= len || !/[\w.]/.test(line[j])) return line.slice(i);
+    while (j < len && /[\w.]/.test(line[j])) j++;
+    if (line[j] === '<') {
+      const close = line.indexOf('>', j + 1);
+      if (close < 0) return line.slice(i);
+      j = close + 1;
+    }
+    if (line[j] === '(') {
+      let depth = 0;
+      let k = j;
+      for (; k < len; k++) {
+        if (line[k] === '(') depth++;
+        else if (line[k] === ')') {
+          depth--;
+          if (depth === 0) {
+            k++;
+            break;
+          }
+        }
+      }
+      if (depth !== 0) return line.slice(i);
+      j = k;
+    }
+    if (j < len && line[j] !== ' ' && line[j] !== '\t') return line.slice(i);
+    i = j;
+  }
+  return line.slice(i);
+}
+
+const SWIFT_DECL = /^(\s*(?:(?:open|public|package|internal|private|fileprivate|(?:public|package|internal|private|fileprivate)\(set\)|final|indirect|nonisolated(?:\([^)]*\))?|static|class|override|required|convenience|mutating|nonmutating|prefix|postfix|infix|lazy|weak|unowned(?:\((?:safe|unsafe)\))?|dynamic|distributed|optional|borrowing|consuming)\s+)*)(func|class|struct|enum|protocol|extension|typealias|actor|macro|let|var)\b(.*)$/u;
 
 const SWIFT_CONTAINER_WORDS = new Set(['class', 'struct', 'enum', 'protocol', 'extension', 'actor']);
 
@@ -587,7 +623,7 @@ function scanSwiftSource(source: string): SwiftSymbol[] {
       continue;
     }
     const startDepth = depth;
-    const match = maskedLine.match(SWIFT_DECL);
+    const match = stripSwiftLeadingAttributes(maskedLine).match(SWIFT_DECL);
     if (match) {
       // match[1] is the captured modifier run only — attributes stay outside it, so attribute
       // arguments like @_documentation(visibility: internal) cannot pollute access detection.

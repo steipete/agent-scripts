@@ -63,6 +63,6 @@ Use one unique 1Password Login item per host/account. Keep FileVault recovery ma
 
 ## Observed snapshots
 
-Write live collector output to `~/Projects/manager/fleet/snapshots/<host-id>.json`. A snapshot is evidence, not desired state. Never adopt source-only packages automatically; show a diff and let Peter select what becomes managed.
+Write live collector output to `~/Projects/manager/fleet/snapshots/<host-id>.json`. Account `admin` is `true` or `false` only after a recognized `dseditgroup` membership response; failed or unreadable checks are `null`. A snapshot is evidence, not desired state. Never adopt source-only packages automatically; show a diff and let Peter select what becomes managed.
 
 Required-tool entries normally record executable presence. The CamSnap entry additionally records `version` from `camsnap --version` and the resolved executable's SHA-256 so a rollout can prove the selected binary, including a reviewed host-local override, rather than merely proving that a path exists.
