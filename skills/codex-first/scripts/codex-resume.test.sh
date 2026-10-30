@@ -61,22 +61,23 @@ check "dry-run runs nothing" '[ "$(calls)" -eq 0 ]'
 
 setup ok ok; run --message "decision: land it" "$sid"
 check "ok exits 0" '[ "$rc" -eq 0 ]'
-check "resume flags, no -C" 'argv 1 | grep -q "^exec resume $sid --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -m gpt-6.1-sol -c model_reasoning_effort=\"high\" --enable fast_mode -c service_tier=\"ultrafast\" -c model_auto_compact_token_limit=260000 -o " && ! argv 1 | grep -q -- " -C "'
+check "resume flags, no -C" 'argv 1 | grep -q "^exec resume $sid --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -m gpt-6.1-sol -c model_reasoning_effort=\"high\" --enable fast_mode -c service_tier=\"fast\" -o " && ! argv 1 | grep -q -- " -C "'
 check "runs in the recorded cwd" '[ "$(sed -n 1p "$STUB/cwd")" = "$root/wt" ]'
 check "sends the follow-up" 'grep -q "decision: land it" "$STUB/stdin.1"'
 check "writes the final message" 'grep -q "final report" "$XDG_STATE_HOME/codex-first/$sid/last-message.md"'
 
 setup fallback ratelimit ok; run --message "decision: land it" "$sid"
 check "rate limit then ok exits 0" '[ "$rc" -eq 0 ]'
-check "falls back to astra ultrafast" 'argv 2 | grep -q "\-m gpt-6-astra .*service_tier=\"ultrafast\""'
+check "falls back to astra fast" 'argv 2 | grep -q "\-m gpt-6-astra .*service_tier=\"fast\""'
 check "retry sends continue, not the follow-up again" 'grep -q "rate-limit or transport" "$STUB/stdin.2" && ! grep -q "decision" "$STUB/stdin.2"'
 
 setup flipback ratelimit capacity ok; run "$sid"
 check "both limited then ok exits 0" '[ "$rc" -eq 0 ]'
-check "returns to sol ultrafast after astra limit" 'argv 3 | grep -q "\-m gpt-6.1-sol .*service_tier=\"ultrafast\""'
+check "returns to sol fast after astra limit" 'argv 3 | grep -q "\-m gpt-6.1-sol .*service_tier=\"fast\""'
 
-setup start-astra ratelimit ok; run --model gpt-6-astra --tier fast "$sid"
-check "astra start falls back to sol" 'argv 2 | grep -q "\-m gpt-6.1-sol .*service_tier=\"ultrafast\""'
+setup start-astra ratelimit ok; run --model gpt-6-astra --tier ultrafast "$sid"
+check "requested ultrafast keeps the 260k compact cap" 'argv 1 | grep -q "\-m gpt-6-astra .*service_tier=\"ultrafast\" -c model_auto_compact_token_limit=260000 -o "'
+check "astra start falls back to sol" 'argv 2 | grep -q "\-m gpt-6.1-sol .*service_tier=\"fast\" -o "'
 
 setup overloaded overloaded ok; run "$sid"
 check "overloaded switches models" '[ "$rc" -eq 0 ] && argv 2 | grep -q "\-m gpt-6-astra"'

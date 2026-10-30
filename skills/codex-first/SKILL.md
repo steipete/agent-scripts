@@ -8,33 +8,33 @@ description: "Claude Code work routing: delegate hands-on work to Codex under th
 ## Launch flags — read first, copy verbatim
 
 Default every Codex worker, **fresh or resumed**, to **GPT-6.1 Sol, high
-reasoning, Ultrafast service tier** (`service_tier="ultrafast"`). Pass all three
-settings unless the user requests an override.
+reasoning, Fast service tier** (`service_tier="fast"`, sent as API `priority`;
+Peter, 2026-10-30). Pass all three settings unless the user requests an override.
 
 ```bash
 # fresh
 codex exec --yolo -C "$WT" \
   -m gpt-6.1-sol -c 'model_reasoning_effort="high"' \
-  --enable fast_mode -c 'service_tier="ultrafast"' \
-  -c 'model_auto_compact_token_limit=260000' \
+  --enable fast_mode -c 'service_tier="fast"' \
   -o "$OUT" - < "$ORDER"
 # resume: pass the same flags again; resume does not inherit them
 codex exec resume "$SID" --dangerously-bypass-approvals-and-sandbox \
   -m gpt-6.1-sol -c 'model_reasoning_effort="high"' \
-  --enable fast_mode -c 'service_tier="ultrafast"' \
-  -c 'model_auto_compact_token_limit=260000' -o "$OUT" -
+  --enable fast_mode -c 'service_tier="fast"' -o "$OUT" -
 ```
 
-- Ultrafast has a context ceiling (measured 2026-10-13, direct Responses probes, gpt-6.1-sol +
-  gpt-6-astra): served `ultrafast` up to ~282k prompt tokens, flaky at 288–294k, `fast` at
-  ≥300k — silently, HTTP 200. Config default compacts at 400k, so long workers drift to Fast;
-  the 260k compact cap keeps them Ultrafast. Rollouts record only the requested tier; prove the
-  served tier with a direct probe (`response.service_tier`).
+- Old Codex CLIs silently omit tiers they do not know (codex-cli 0.147 on Team warned
+  `not advertised` and sent no tier); keep the CLI current. Verified on Team with 0.166.0,
+  2026-10-30.
+- Ultrafast only on request: swap in `-c 'service_tier="ultrafast"'` and add
+  `-c 'model_auto_compact_token_limit=260000'`. It is served up to ~282k prompt tokens, flaky at
+  288–294k, and silently `fast` at ≥300k (measured 2026-10-13); the 260k cap keeps it there.
+  Rollouts record only the requested tier; prove the served tier with a direct probe
+  (`response.service_tier`). Details: [launch details](references/launch-details.md).
 - Context: workers get the base 500k window. Add `-p sol61-1m` (or `-p astra-1m`) only when the
-  order needs a whole-repo context; see `$codex-huge-context`. Those profiles forfeit Ultrafast
-  above ~280k.
-- Copy all model/reasoning/tier flags into wrappers; override only on user request. Verify launch arguments (`ultrafast` default; requested `fast` is valid).
-- For requested Fast reviews, use `--codex-speed fast`.
+  order needs a whole-repo context; see `$codex-huge-context`.
+- Copy all model/reasoning/tier flags into wrappers; override only on user request. Verify launch
+  arguments (`fast` default; requested `ultrafast` is valid).
 
 ### Security audits and cyber-classifier refusals → Daybreak Red (Peter, 2026-10-15/18)
 
@@ -51,21 +51,20 @@ models"). Don't rephrase to dodge the classifier or hop between regular models.
   auth command in `~/.codex/config.toml`).
 - Slug: the `model_catalog_json` entry whose `display_name` is `Daybreak Red`. Keep it out of
   public artifacts (commits, PRs, issues, logs) per public model naming.
-- No Ultrafast: drop `--enable fast_mode` / `service_tier`; keep `model_reasoning_effort="high"`.
+- No Fast/Ultrafast tier: drop `--enable fast_mode` / `service_tier`; keep `model_reasoning_effort="high"`.
 - Verified 2026-10-15 with a one-line `codex exec` probe on the direct provider.
 
 ### Capacity fallback (Peter, 2026-10-12)
 
 Org caps `gpt-6.1-sol` at 40M tokens/min. Worker or resume fails with `Rate limit reached for
 gpt-6.1-sol ... tokens per min (TPM)`, `Selected model is at capacity`, or `overloaded` → resume
-that same session on **GPT-6 Astra, high, Ultrafast** immediately (Peter, 2026-10-12: "use
-astra if sol has rate limits"; Astra serves `ultrafast`, verified 2026-10-13); no waiting loop:
+that same session on **GPT-6 Astra, high, Fast** immediately (Peter, 2026-10-12: "use
+astra if sol has rate limits"); no waiting loop:
 
 ```bash
 codex exec resume "$SID" --dangerously-bypass-approvals-and-sandbox \
   -m gpt-6-astra -c 'model_reasoning_effort="high"' \
-  --enable fast_mode -c 'service_tier="ultrafast"' \
-  -c 'model_auto_compact_token_limit=260000' -o "$OUT" -
+  --enable fast_mode -c 'service_tier="fast"' -o "$OUT" -
 ```
 
 - Resume onto Astra keeps the thread (verified 2026-10-12: Sol-created session resumed on Astra and replied).
@@ -77,7 +76,7 @@ codex exec resume "$SID" --dangerously-bypass-approvals-and-sandbox \
 - Autoreview at capacity: `--model gpt-6-astra --thinking high --codex-speed fast`. If autoreview
   refuses because its provider/route doesn't match operator config, don't change config — review
   with a fresh-context subagent (diff + brief) and say so in the PR.
-- New workers still start on Sol 6.1 Ultrafast; fall back per worker, only on the capacity error.
+- New workers still start on Sol 6.1 Fast; fall back per worker, only on the capacity error.
 - Restarts and recoveries: `~/.codex/skills/agent-scripts/codex-first/scripts/codex-resume` does the
   fallback, busy check, safe stop, and classified exits ([resume and watchdog](references/resume-and-watchdog.md)).
 
@@ -146,7 +145,7 @@ self-delegation. Continue the task directly. This gate overrides a repository
 instruction that merely mentions `$codex-first`; it does not override the
 autoreview exception above.
 
-The default worker is GPT-6.1 Sol on the Ultrafast tier. Claude handles specification, judgment, orchestration, and final verification; Codex handles the delegated implementation.
+The default worker is GPT-6.1 Sol on the Fast tier. Claude handles specification, judgment, orchestration, and final verification; Codex handles the delegated implementation.
 
 ## Route
 

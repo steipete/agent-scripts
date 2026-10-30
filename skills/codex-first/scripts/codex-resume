@@ -19,7 +19,7 @@ Options:
       --log-dir DIR     per-attempt logs (default: directory of --out)
       --cwd DIR         override the session's recorded cwd
       --model M         starting model (default gpt-6.1-sol; fallback gpt-6-astra)
-      --tier T          starting service tier (default ultrafast for both)
+      --tier T          starting service tier (default fast for both)
       --stop            stop a live worker on this session first, then resume
       --force           with --stop: stop even while git/landing commands run
       --max-attempts N  attempts before giving up (default 12)
@@ -36,10 +36,15 @@ die() { echo "codex-resume: $1" >&2; exit "${2:-2}"; }
 sid_arg="" prompt_file="" message="" out="" log_dir="" cwd=""
 stop=0 force=0 dry=0 max_attempts=12
 # A rate limit switches between these two; --model/--tier only pick where the run starts.
-primary_model="${CODEX_PRIMARY_MODEL:-gpt-6.1-sol}" primary_tier="${CODEX_PRIMARY_TIER:-ultrafast}"
-fallback_model="${CODEX_FALLBACK_MODEL:-gpt-6-astra}" fallback_tier="${CODEX_FALLBACK_TIER:-ultrafast}"
+primary_model="${CODEX_PRIMARY_MODEL:-gpt-6.1-sol}" primary_tier="${CODEX_PRIMARY_TIER:-fast}"
+fallback_model="${CODEX_FALLBACK_MODEL:-gpt-6-astra}" fallback_tier="${CODEX_FALLBACK_TIER:-fast}"
 # Ultrafast is served only below ~280k prompt tokens; compacting at 260k keeps workers on it.
-compact_limit="${CODEX_AUTO_COMPACT_TOKEN_LIMIT:-260000}"
+# Fast keeps Codex's own compaction unless CODEX_AUTO_COMPACT_TOKEN_LIMIT is set.
+compact_flag() { # <tier>
+  local limit="${CODEX_AUTO_COMPACT_TOKEN_LIMIT:-}"
+  [ -n "$limit" ] || [ "$1" != ultrafast ] || limit=260000
+  [ -z "$limit" ] || printf '%s\n' -c "model_auto_compact_token_limit=$limit"
+}
 model="$primary_model" tier="$primary_tier"
 reasoning="${CODEX_REASONING:-high}"
 backoff="${CODEX_RESUME_BACKOFF:-180}" transport_wait="${CODEX_RESUME_TRANSPORT_WAIT:-30}"
@@ -116,7 +121,7 @@ if [ "$dry" -eq 1 ]; then
   echo "start    $model/$tier (reasoning $reasoning); on limit switches $primary_model/$primary_tier <-> $fallback_model/$fallback_tier"
   echo "out      $out"
   echo "logs     $log_dir/resume-<utc>-p<pid>-<n>.log"
-  echo "command  (cd $cwd && codex exec resume $sid --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -m $model -c model_reasoning_effort=\"$reasoning\" --enable fast_mode -c service_tier=\"$tier\" -c model_auto_compact_token_limit=$compact_limit -o $out - < <prompt>)"
+  echo "command  (cd $cwd && codex exec resume $sid --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -m $model -c model_reasoning_effort=\"$reasoning\" --enable fast_mode -c service_tier=\"$tier\" $(compact_flag "$tier" | tr '\n' ' ')-o $out - < <prompt>)"
   exit 0
 fi
 
@@ -173,7 +178,7 @@ for attempt in $(seq 1 "$max_attempts"); do
   (cd "$cwd" && command codex exec resume "$sid" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check \
     -m "$cur_model" -c "model_reasoning_effort=\"$reasoning\"" \
     --enable fast_mode -c "service_tier=\"$cur_tier\"" \
-    -c "model_auto_compact_token_limit=$compact_limit" \
+    $(compact_flag "$cur_tier") \
     -o "$out" - < "$prompt") > "$log" 2>&1
   rc=$?
   if [ "$rc" -eq 0 ]; then

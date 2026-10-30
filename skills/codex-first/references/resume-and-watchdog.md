@@ -28,7 +28,7 @@ It owns the traps below so wrappers don't have to:
   `git push/rebase/merge/cherry-pick/am/commit`, or `gh pr merge/create`; an interrupted
   `scripts/pr` checkout once left a zero-byte file on a PR. `--force` overrides.
 - **Capacity fallback.** `Rate limit reached for …`, `Selected model is at capacity`, or
-  `overloaded` switches between Sol 6.1 and Astra 6 (both Ultrafast, compacting at 260k); when
+  `overloaded` switches between Sol 6.1 and Astra 6 (both Fast); when
   both are limited it sleeps 180 s, then 360, 540, 720 s between rounds.
   A transport death (`stream disconnected`, exhausted reconnects) retries the same model after 30 s.
   Retries send a short "continue" message; the follow-up is already in the session.
@@ -48,7 +48,7 @@ For follow-up fixes, resume from the repo directory with the same model, reasoni
 (cd <repo> && command codex exec resume <session-id> \
   --dangerously-bypass-approvals-and-sandbox \
   -m gpt-6.1-sol -c 'model_reasoning_effort="high"' \
-  --enable fast_mode -c 'service_tier="ultrafast"' \
+  --enable fast_mode -c 'service_tier="fast"' \
   -o /tmp/codex-last.md - <"$P2" 2>/dev/null)
 ```
 
@@ -96,7 +96,7 @@ For runs you must not babysit, trade the stderr suppression for a log and watch 
 ```bash
 command codex exec --yolo -C <repo> \
   -m gpt-6.1-sol -c 'model_reasoning_effort="high"' \
-  --enable fast_mode -c 'service_tier="ultrafast"' \
+  --enable fast_mode -c 'service_tier="fast"' \
   -o "$OUT" - <"$P" > "$LOG" 2>&1
 # Claude Code: run the line above as its own Bash run_in_background call
 # (tracked chip + completion notification). Append `&` + a PID file ONLY in

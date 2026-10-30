@@ -1,20 +1,22 @@
 # Launch details
 
-Read for Fast/interactive launches, catalog checks, or a missing CLI. The [entrypoint](../SKILL.md) owns the gate and default launch flags.
+Read for Ultrafast/interactive launches, catalog checks, or a missing CLI. The [entrypoint](../SKILL.md) owns the gate and default launch flags.
 
-### Optional Fast
+### Optional Ultrafast
 
-When the user asks for Fast (cheaper, still prioritized), replace
-`-c 'service_tier="ultrafast"'` with `-c 'service_tier="fast"'` (sent as API
-`priority`) in the fresh/resume recipes. Keep 6.1 Sol, high reasoning,
-`--enable fast_mode`, and the existing provider and execution policy. Do not
-promote either tier into the base `config.toml`; the launch flags own the tier.
+Fast (`service_tier="fast"`, sent as API `priority`) is the default tier
+(Peter, 2026-10-30). When the user asks for Ultrafast, replace
+`-c 'service_tier="fast"'` with `-c 'service_tier="ultrafast"'` and add
+`-c 'model_auto_compact_token_limit=260000'` in the fresh/resume recipes. Keep
+6.1 Sol, high reasoning, `--enable fast_mode`, and the existing provider and
+execution policy. Do not promote either tier into the base `config.toml`; the
+launch flags own the tier.
 
 For an interactive session, use the same per-launch flags:
 
 ```bash
 codex --no-daemon -m gpt-6.1-sol -c 'model_reasoning_effort="high"' \
-  --enable fast_mode -c 'service_tier="ultrafast"'
+  --enable fast_mode -c 'service_tier="fast"'
 ```
 
 An optional `ultrafast.config.toml` profile in `CODEX_HOME` may instead contain
@@ -23,7 +25,7 @@ the model, high reasoning, and Ultrafast tier; select it with
 context settings. Prefer these launch overrides to `/ultrafast` or `/fast`: the
 slash commands save the selected tier into the base config.
 
-The active model catalog must list `gpt-6.1-sol` with the `ultrafast` tier, and
+For Ultrafast, the active model catalog must list `gpt-6.1-sol` with the `ultrafast` tier, and
 the account must support it. The installed Codex's native catalog lists 6.1 Sol
 with `priority` only, and Codex can silently omit an unlisted tier, so the
 custom direct-API catalog (`$codex-huge-context`) carries the ultrafast entry.
@@ -45,7 +47,7 @@ P=$(mktemp); cat >"$P" <<'EOF'
 EOF
 command codex exec --yolo -C <repo> \
   -m gpt-6.1-sol -c 'model_reasoning_effort="high"' \
-  --enable fast_mode -c 'service_tier="ultrafast"' \
+  --enable fast_mode -c 'service_tier="fast"' \
   -o /tmp/codex-last.md - <"$P" 2>/dev/null
 ```
 ## CLI installation
