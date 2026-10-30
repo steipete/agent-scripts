@@ -70,7 +70,7 @@ command codex exec --yolo -C <repo> \
 
 - Host preflight: run `timeout 8 git --version`; if it hangs on a Mac with Xcode-beta selected, export `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` in the session and every work order.
 
-If the saved configuration selects the `openai_api_direct` route, run `ruby ~/.codex/skills/agent-scripts/codex-huge-context/scripts/preflight.rb` before the first fresh or resumed launch in the batch. Fail closed if it cannot deliver the Keychain credential; never work around it by overriding the provider or using ordinary Codex authentication.
+If the saved configuration selects the `openai_api_direct` route, run `$codex-huge-context`'s `scripts/preflight.rb` (via `ruby`) before the first fresh or resumed launch in the batch. Fail closed if it cannot deliver the Keychain credential; never work around it by overriding the provider or using ordinary Codex authentication.
 
 - These overrides select the model and service tier, not the provider. Resumed sessions retain their recorded provider; use a fresh worker if it is incompatible with 6.1 Sol. Do not silently fall back to another model.
 - `--yolo` is the house default; Codex may run commands/tests freely. Keep prompts scoped to the target repo.

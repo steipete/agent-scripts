@@ -1,6 +1,6 @@
 ---
 name: codex-first
-description: "Claude Code work routing: delegate hands-on work to Codex under the native-Claude model gate. Keep specification, judgment, and verification in Claude; prefer isolated Codex-backed autoreview."
+description: "Claude Code / OpenClaw-on-Claude work routing: delegate hands-on work to Codex under the native-Claude model gate. Keep specification, judgment, and verification in Claude; prefer isolated Codex-backed autoreview."
 ---
 
 # Codex First
@@ -77,7 +77,7 @@ codex exec resume "$SID" --dangerously-bypass-approvals-and-sandbox \
   refuses because its provider/route doesn't match operator config, don't change config — review
   with a fresh-context subagent (diff + brief) and say so in the PR.
 - New workers still start on Sol 6.1 Fast; fall back per worker, only on the capacity error.
-- Restarts and recoveries: `~/.codex/skills/agent-scripts/codex-first/scripts/codex-resume` does the
+- Restarts and recoveries: this skill's `scripts/codex-resume` does the
   fallback, busy check, safe stop, and classified exits ([resume and watchdog](references/resume-and-watchdog.md)).
 
 ### Wrapper and process hygiene (2026-10-12/13)
@@ -109,17 +109,18 @@ below.
 
 Use the autoreview helper with `--engine codex` (defaults: 6.1 Sol, medium, Ultrafast) unless the user requests an override. It tries the ChatGPT subscription first and, on an auth failure, retries once on the configured direct-API provider; pass `--codex-config 'model_provider="openai_api_direct"'` only to skip the subscription attempt. Preserve the helper's reviewer isolation.
 
-For direct hands-on delegation, use this skill only
-when the active agent is Claude Code **and** the session is running on a native
-Claude model.
+For direct hands-on delegation, use this skill only when the session is running
+on a native Claude model and can run shell commands: Claude Code, or an OpenClaw
+agent (for example on the Team Gateway) whose session model is Claude.
 
 **Model check (primary).** The point of the gate is model economics: Claude
 tokens are metered and expensive, so hands-on work moves to Codex; but if the
 session is already routed to a cheaper/other model, delegation gains nothing.
 Decide by the model the session actually runs on, not by the transport:
 
-1. Read the model id from the system prompt's environment section ("You are
-   powered by the model …"). Router-wrapped ids may be opaque
+1. Read the model id: Claude Code shows it in the system prompt's environment
+   section ("You are powered by the model …"); OpenClaw shows it in the
+   Runtime line and `session_status`. Router-wrapped ids may be opaque
    (`claude-ccr-<hex>`); the hex suffix is often ASCII — decode it
    (`echo <hex> | xxd -r -p`) to reveal the underlying route, e.g.
    `Gorilla CCP/native-claude-fable-5`.
@@ -140,8 +141,8 @@ transport heuristic: if `ANTHROPIC_BASE_URL`'s host is
 a non-Claude model and work directly. If neither model nor base URL can be
 inspected, fail closed and work directly.
 
-Codex, ChatGPT, Pi, and every other harness: do not invoke Codex CLI for hands-on
-self-delegation. Continue the task directly. This gate overrides a repository
+Sessions on Codex, ChatGPT, Pi, or any non-Claude model (including OpenClaw
+agents on GPT): do not invoke Codex CLI for hands-on self-delegation. Continue the task directly. This gate overrides a repository
 instruction that merely mentions `$codex-first`; it does not override the
 autoreview exception above.
 
@@ -192,9 +193,11 @@ Portfolio/multi-repo work: `$maintainer-orchestrator` instead.
 ## Invoke
 
 - Run `timeout 8 git --version`; for an Xcode-beta hang, set `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` in the session and every order.
-- For `openai_api_direct`, run `ruby ~/.codex/skills/agent-scripts/codex-huge-context/scripts/preflight.rb` before the batch's first fresh/resumed launch. If Keychain delivery fails, stop; never override the provider or use ordinary Codex auth.
+- For `openai_api_direct`, run `$codex-huge-context`'s `scripts/preflight.rb` (via `ruby`) before the batch's first fresh/resumed launch. If Keychain delivery fails, stop; never override the provider or use ordinary Codex auth.
 - Keep the configured provider; resume inherits it. If incompatible with 6.1 Sol, start fresh; never silently change models.
 - Use repo-scoped `--yolo`, temp-file prompts (never inline quoting), and `-o` results (not JSONL).
+- **OpenClaw agents:** launch each worker as a background exec and poll its `-o`
+  file; never block a turn on a long `codex exec`.
 - **Harness visibility (Claude Code): every codex run gets its own harness-tracked
   background command (`run_in_background: true`) — one sidebar chip per worker,
   completion notification included. Chain setup steps (installs, worktree prep)

@@ -8,7 +8,7 @@ Use the script for every restart, follow-up resume, or rate-limit recovery inste
 `codex exec resume` lines. Run it as its own harness-tracked background command.
 
 ```bash
-R=~/.codex/skills/agent-scripts/codex-first/scripts/codex-resume
+R=<this skill>/scripts/codex-resume   # e.g. ~/.claude/skills/codex-first/scripts/codex-resume
 $R --dry-run "$SID"                                 # resolved cwd, live pid, exact command
 $R -p "$DELTA_FILE" -o "$OUT" "$SID"                # follow-up from a file (--message "…" inline)
 $R -o "$OUT" "$LOG"                                 # session id read from the fresh run's log
