@@ -36,15 +36,11 @@ cp "$VTD_FIXTURE_VTT" "$(dirname "$out")/fixture.vtt"
   fs.chmodSync(bin, 0o755);
 }
 
-function vtdTempNames() {
-  return new Set(fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith("vtd-subs-")));
-}
-
 function runTranscript({ vtt, timestamps }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "vtd-test-"));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "vtd-subs-"));
   const binDir = path.join(root, "bin");
   const fixture = path.join(root, "fixture.vtt");
-  const beforeTemps = vtdTempNames();
   writeFakeYtDlp(binDir);
   fs.writeFileSync(fixture, vtt);
   const args = ["transcript", "--url", "https://example.com/video"];
@@ -56,6 +52,7 @@ function runTranscript({ vtt, timestamps }) {
         ...process.env,
         PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
         VTD_FIXTURE_VTT: fixture,
+        TMPDIR: root,
       },
     });
     let stdout = "";
@@ -69,13 +66,11 @@ function runTranscript({ vtt, timestamps }) {
       stderr += chunk;
     });
     child.on("close", (code) => {
-      for (const name of fs.readdirSync(os.tmpdir())) {
-        if (name.startsWith("vtd-subs-") && !beforeTemps.has(name)) {
-          fs.rmSync(path.join(os.tmpdir(), name), { recursive: true, force: true });
-        }
-      }
+      const outsideSurvived = fs.existsSync(outside);
+      const ownedSubs = fs.readdirSync(root).filter((name) => name.startsWith("vtd-subs-"));
       fs.rmSync(root, { recursive: true, force: true });
-      resolve({ code, stdout, stderr });
+      fs.rmSync(outside, { recursive: true, force: true });
+      resolve({ code, stdout, stderr, outsideSurvived, ownedSubs });
     });
   });
 }
@@ -100,6 +95,10 @@ test("timestamped empty subtitles fail the same way as an empty paragraph", asyn
   assert.equal(stamped.code, plain.code);
   assert.equal(stamped.stderr, plain.stderr);
   assert.equal(stamped.stdout, plain.stdout);
+  assert.equal(plain.outsideSurvived, true);
+  assert.equal(stamped.outsideSurvived, true);
+  assert.equal(plain.ownedSubs.length, 1);
+  assert.equal(stamped.ownedSubs.length, 1);
 });
 
 test("timestamped non-empty subtitles still print the cleaned paragraph", async () => {
@@ -110,4 +109,8 @@ test("timestamped non-empty subtitles still print the cleaned paragraph", async 
   assert.equal(stamped.stdout, "Hello from captions\n");
   assert.equal(stamped.stdout, plain.stdout);
   assert.equal(stamped.stderr, "");
+  assert.equal(plain.outsideSurvived, true);
+  assert.equal(stamped.outsideSurvived, true);
+  assert.equal(plain.ownedSubs.length, 0);
+  assert.equal(stamped.ownedSubs.length, 0);
 });
