@@ -253,8 +253,10 @@ async function cmdTranscript({ url, lang, timestamps, keepBrackets, extra }) {
     if (timestamps) {
       // Subtitle timestamps are inconsistent across sites; keep output stable here.
       const paragraph = toParagraph(segments, { keepBrackets });
-      process.stdout.write(paragraph + "\n");
-      return;
+      if (paragraph) {
+        process.stdout.write(paragraph + "\n");
+        return;
+      }
     }
     const paragraph = toParagraph(segments, { keepBrackets });
     if (!paragraph) die("empty transcript from subtitles");
