@@ -113,10 +113,81 @@ startup_file_secure() {
 
 zprofile_loads_profile_token() {
   startup_file_secure "$zprofile" || return 1
+  # A commented-out command is not a loader, and naming the token is not a read.
+  # shellcheck disable=SC2016
   awk '
-    /^[[:space:]]*(source|\.)[[:space:]]+"?[$]HOME\/\.profile"?[[:space:]]*$/ { found=1 }
-    index($0, "OP_SERVICE_ACCOUNT_TOKEN") && index($0, ".profile") &&
-      $0 ~ /^[[:space:]]*(source|eval)[[:space:]]/ { found=1 }
+    function shell_code(line,    i, n, c, q) {
+      n = length(line)
+      q = ""
+      for (i = 1; i <= n; i++) {
+        c = substr(line, i, 1)
+        if (q == "\047") {
+          if (c == "\047") q = ""
+        } else if (q == "\"") {
+          if (c == "\\") i++
+          else if (c == "\"") q = ""
+        } else if (c == "\047" || c == "\"") {
+          q = c
+        } else if (c == "#" && (i == 1 || substr(line, i - 1, 1) ~ /[[:space:]|&;<>()`]/)) {
+          return substr(line, 1, i - 1)
+        }
+      }
+      return line
+    }
+
+    function word_end(text, pos) {
+      return pos > length(text) || substr(text, pos, 1) !~ /[[:alnum:]_.\/-]/
+    }
+
+    function token_word(text, pos,    plain, tilde, quoted) {
+      plain = "$HOME/.config/op/molty-service-account-token"
+      tilde = "~/.config/op/molty-service-account-token"
+      quoted = "\"" plain "\""
+      if (substr(text, pos, length(quoted)) == quoted && word_end(text, pos + length(quoted)))
+        return 1
+      if (substr(text, pos, length(plain)) == plain && word_end(text, pos + length(plain)))
+        return 1
+      if (substr(text, pos, length(tilde)) == tilde && word_end(text, pos + length(tilde)))
+        return 1
+      return 0
+    }
+
+    function reads_token(text,    i, n, j, prev) {
+      n = length(text)
+      for (i = 1; i <= n; i++) {
+        if (substr(text, i, 1) != "<") continue
+        if (substr(text, i + 1, 1) == "<") {
+          i++
+          continue
+        }
+        j = i + 1
+        if (substr(text, j, 1) == "&" || substr(text, j, 1) == "(") continue
+        if (substr(text, j, 1) == ">") j++
+        while (j <= n && substr(text, j, 1) ~ /[[:space:]]/) j++
+        if (token_word(text, j)) return 1
+      }
+      for (i = 1; i <= n; i++) {
+        prev = (i == 1) ? "" : substr(text, i - 1, 1)
+        if (i > 1 && prev !~ /[[:space:]|;|&<>()`"\047\/]/) continue
+        if (substr(text, i, 3) != "cat") continue
+        if (i + 3 <= n && substr(text, i + 3, 1) !~ /[[:space:]]/) continue
+        j = i + 3
+        while (j <= n && substr(text, j, 1) ~ /[[:space:]]/) j++
+        if (token_word(text, j)) return 1
+      }
+      return 0
+    }
+
+    BEGIN { found = 0 }
+    {
+      code = shell_code($0)
+      if (code ~ /^[[:space:]]*(source|\.)[[:space:]]+"?[$]HOME\/\.profile"?[[:space:]]*$/ ||
+          code ~ /^[[:space:]]*(source|\.)[[:space:]]+~\/\.profile[[:space:]]*$/) found = 1
+      else if (code ~ /^[[:space:]]*(source|\.)[[:space:]]+"[$]HOME\/\.config\/op\/molty-service-account-token"[[:space:]]*$/ ||
+               code ~ /^[[:space:]]*(source|\.)[[:space:]]+[$]HOME\/\.config\/op\/molty-service-account-token[[:space:]]*$/ ||
+               code ~ /^[[:space:]]*(source|\.)[[:space:]]+~\/\.config\/op\/molty-service-account-token[[:space:]]*$/) found = 1
+      else if (code ~ /^[[:space:]]*eval[[:space:]]/ && reads_token(code)) found = 1
+    }
     END { exit found ? 0 : 1 }
   ' "$zprofile"
 }
