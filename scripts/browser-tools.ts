@@ -369,19 +369,34 @@ program
               });
             };
 
+            const readClassName = (className: unknown): string => {
+              if (typeof className === 'string') {
+                return className;
+              }
+              // SVG elements expose className as an SVGAnimatedString, not a string.
+              if (className !== null && typeof className === 'object' && 'baseVal' in className) {
+                const baseVal = (className as { baseVal?: unknown }).baseVal;
+                if (typeof baseVal === 'string') {
+                  return baseVal;
+                }
+              }
+              return '';
+            };
+
             const serialize = (el: HTMLElement) => {
               const parents: string[] = [];
               let current = el.parentElement;
               while (current && current !== document.body) {
                 const id = current.id ? `#${current.id}` : '';
-                const cls = current.className ? `.${current.className.trim().split(/\s+/).join('.')}` : '';
+                const clsName = readClassName(current.className);
+                const cls = clsName ? `.${clsName.trim().split(/\s+/).join('.')}` : '';
                 parents.push(`${current.tagName.toLowerCase()}${id}${cls}`);
                 current = current.parentElement;
               }
               return {
                 tag: el.tagName.toLowerCase(),
                 id: el.id || null,
-                class: el.className || null,
+                class: readClassName(el.className) || null,
                 text: el.textContent?.trim()?.slice(0, 200) || null,
                 html: el.outerHTML.slice(0, 500),
                 parents: parents.join(' > '),
