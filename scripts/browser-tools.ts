@@ -20,6 +20,21 @@ import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 import puppeteer, { type HTTPRequest } from 'puppeteer-core';
 
+export async function readConsoleHandle(handle: {
+  jsonValue: () => Promise<unknown>;
+  dispose?: () => Promise<void> | void;
+}): Promise<unknown> {
+  try {
+    return await handle.jsonValue();
+  } finally {
+    try {
+      await handle.dispose?.();
+    } catch {
+      // The value is already copied. A dispose failure must not replace it.
+    }
+  }
+}
+
 /** Utility type so TypeScript knows the async function constructor */
 type AsyncFunctionCtor = new (...args: string[]) => (...fnArgs: unknown[]) => Promise<unknown>;
 
@@ -554,7 +569,7 @@ program
         const values = await Promise.all(
           args.map(async (arg: any) => {
             try {
-              const value = await arg.jsonValue();
+              const value = await readConsoleHandle(arg);
               return formatValue(value);
             } catch (error) {
               const errorMsg = error instanceof Error ? error.message : String(error);
