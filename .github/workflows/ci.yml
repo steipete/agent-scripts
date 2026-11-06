@@ -92,7 +92,7 @@ jobs:
       - name: Build browser helper
         run: |
           bun install --frozen-lockfile
-          bun test scripts/browser-tools-profile.test.ts scripts/browser-tools-navigation.test.ts
+          bun test scripts/browser-tools-profile.test.ts scripts/browser-tools-navigation.test.ts scripts/browser-tools-start.test.ts
           bun build scripts/browser-tools.ts --compile --target bun --outfile /tmp/browser-tools
           /tmp/browser-tools --help
 

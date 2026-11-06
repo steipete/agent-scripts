@@ -35,6 +35,50 @@ async function connectBrowser(port: number) {
   return puppeteer.connect({ browserURL: browserURL(port), defaultViewport: null });
 }
 
+type DevtoolsSession = {
+  disconnect: () => Promise<void>;
+};
+
+export async function waitForDevtools(options: {
+  connect: () => Promise<DevtoolsSession>;
+  kill: () => void;
+  attempts?: number;
+  sleep?: (ms: number) => Promise<void>;
+}): Promise<boolean> {
+  const attempts = options.attempts ?? 30;
+  const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const browser = await options.connect();
+      await browser.disconnect();
+      return true;
+    } catch {
+      await sleep(500);
+    }
+  }
+  options.kill();
+  return false;
+}
+
+export function killDetachedProcess(pid: number | undefined): void {
+  if (!pid || pid <= 0) {
+    return;
+  }
+  if (process.platform !== 'win32') {
+    try {
+      process.kill(-pid, 'SIGTERM');
+      return;
+    } catch {
+      // Not a process-group leader, or it already exited.
+    }
+  }
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // The process already exited.
+  }
+}
+
 function resolveComparablePath(inputPath: string): string {
   let existingPath = path.resolve(inputPath);
   const missingSegments: string[] = [];
@@ -138,22 +182,20 @@ program
       copyChromeProfile(source, profileDir);
     }
 
-    spawn(chromePath, [`--remote-debugging-port=${port}`, `--user-data-dir=${profileDir}`, '--no-first-run', '--disable-popup-blocking'], {
-      detached: true,
-      stdio: 'ignore',
-    }).unref();
+    const child = spawn(
+      chromePath,
+      [`--remote-debugging-port=${port}`, `--user-data-dir=${profileDir}`, '--no-first-run', '--disable-popup-blocking'],
+      {
+        detached: true,
+        stdio: 'ignore',
+      },
+    );
+    child.unref();
 
-    let connected = false;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      try {
-        const browser = await connectBrowser(port);
-        await browser.disconnect();
-        connected = true;
-        break;
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-    }
+    const connected = await waitForDevtools({
+      connect: () => connectBrowser(port),
+      kill: () => killDetachedProcess(child.pid),
+    });
 
     if (!connected) {
       console.error(`✗ Failed to start Chrome on port ${port}`);
