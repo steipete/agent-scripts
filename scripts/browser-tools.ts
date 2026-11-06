@@ -9,7 +9,7 @@
  */
 import { Command } from 'commander';
 import { execFileSync, execSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -52,6 +52,58 @@ function pathsOverlap(first: string, second: string): boolean {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
+function pathExists(target: string): boolean {
+  try {
+    lstatSync(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStaging(staging: string): void {
+  rmSync(staging, { recursive: true, force: true });
+}
+
+function removeReplacedPath(target: string): void {
+  if (lstatSync(target).isSymbolicLink()) {
+    unlinkSync(target);
+    return;
+  }
+  rmSync(target, { recursive: true, force: true });
+}
+
+function stagingDirectoryBeside(target: string): string {
+  const parent = path.dirname(target);
+  mkdirSync(parent, { recursive: true });
+  return mkdtempSync(path.join(parent, `.${path.basename(target)}.profile-copy-staging-`));
+}
+
+function replaceWithStaging(target: string, staging: string): void {
+  const backup = `${staging}.replaced`;
+  let movedAside = false;
+  try {
+    if (pathExists(target)) {
+      renameSync(target, backup);
+      movedAside = true;
+    }
+    renameSync(staging, target);
+  } catch (error) {
+    if (movedAside && !pathExists(target)) {
+      try {
+        renameSync(backup, target);
+      } catch {
+        // The original directory stays at the backup path if it cannot be moved back.
+      }
+    }
+    removeStaging(staging);
+    throw error;
+  }
+  if (movedAside) {
+    removeReplacedPath(backup);
+  }
+}
+
 export function copyChromeProfile(sourceDir: string, profileDir: string): void {
   const source = realpathSync(sourceDir);
   if (!statSync(source).isDirectory()) {
@@ -68,25 +120,26 @@ export function copyChromeProfile(sourceDir: string, profileDir: string): void {
     throw new Error('Chrome profile destination symlink target does not exist');
   }
 
-  let destination = resolveComparablePath(profileDir);
+  const destination = resolveComparablePath(profileDir);
   if (pathsOverlap(source, destination) || pathsOverlap(destination, source)) {
     throw new Error('Chrome profile source and destination must not overlap');
   }
 
-  if (existsSync(profileDir) && statSync(profileDir).isDirectory()) {
-    for (const entry of readdirSync(destination)) {
-      rmSync(path.join(destination, entry), { recursive: true, force: true });
-    }
-  } else {
-    rmSync(profileDir, { recursive: true, force: true });
-    mkdirSync(profileDir, { recursive: true });
-    destination = resolveComparablePath(profileDir);
+  // Copy beside the destination first. A failed copy must leave that directory as it was.
+  const replacingDirectory = existsSync(profileDir) && statSync(profileDir).isDirectory();
+  const replaceTarget = replacingDirectory ? destination : profileDir;
+  const staging = stagingDirectoryBeside(replaceTarget);
+  try {
+    cpSync(source, staging, {
+      recursive: true,
+      force: true,
+      verbatimSymlinks: true,
+    });
+  } catch (error) {
+    removeStaging(staging);
+    throw error;
   }
-  cpSync(source, destination, {
-    recursive: true,
-    force: true,
-    verbatimSymlinks: true,
-  });
+  replaceWithStaging(replaceTarget, staging);
 }
 
 async function getActivePage(port: number) {

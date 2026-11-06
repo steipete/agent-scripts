@@ -1,4 +1,4 @@
-import { lstatSync, mkdtempSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -60,6 +60,27 @@ describe('copyChromeProfile', () => {
     expect(readlinkSync(destinationLink)).toBe('destination-target');
     expect(readFileSync(path.join(destinationTarget, 'new-state'), 'utf8')).toBe('new');
     expect(() => readFileSync(path.join(destinationTarget, 'old-state'), 'utf8')).toThrow();
+  });
+
+  test('keeps the destination when the profile copy fails', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'browser-tools-profile-copy-fail-'));
+    const source = path.join(root, 'source');
+    const destination = path.join(root, 'destination');
+    mkdirSync(source);
+    mkdirSync(destination);
+    writeFileSync(path.join(source, 'readable'), 'copied');
+    writeFileSync(path.join(source, 'blocked'), 'blocked');
+    chmodSync(path.join(source, 'blocked'), 0o000);
+    writeFileSync(path.join(destination, 'keep-me.txt'), 'keep');
+
+    try {
+      expect(() => copyChromeProfile(source, destination)).toThrow();
+      expect(readdirSync(destination)).toEqual(['keep-me.txt']);
+      expect(readFileSync(path.join(destination, 'keep-me.txt'), 'utf8')).toBe('keep');
+      expect(readdirSync(root).filter((name) => name.includes('profile-copy-staging'))).toEqual([]);
+    } finally {
+      chmodSync(path.join(source, 'blocked'), 0o644);
+    }
   });
 
   test('replaces a symlink to a non-directory without changing its target', () => {
