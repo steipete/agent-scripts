@@ -247,6 +247,7 @@ async function cmdTranscript({ url, lang, timestamps, keepBrackets, extra }) {
     extra,
   });
 
+  let emptyTranscript = false;
   try {
     const raw = fs.readFileSync(subtitlePath, "utf8");
     const segments = subtitlePath.endsWith(".srt") ? parseSrt(raw) : parseVtt(raw);
@@ -257,11 +258,12 @@ async function cmdTranscript({ url, lang, timestamps, keepBrackets, extra }) {
       return;
     }
     const paragraph = toParagraph(segments, { keepBrackets });
-    if (!paragraph) die("empty transcript from subtitles");
-    process.stdout.write(paragraph + "\n");
+    if (!paragraph) emptyTranscript = true;
+    else process.stdout.write(paragraph + "\n");
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+  if (emptyTranscript) die("empty transcript from subtitles");
 }
 
 async function cmdSubs({ url, lang, outputDir, extra }) {
