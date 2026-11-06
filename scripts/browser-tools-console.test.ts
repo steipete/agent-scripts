@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readConsoleHandle } from './browser-tools';
+import { readConsoleHandle, serializeConsoleMessage } from './browser-tools';
 
 describe('readConsoleHandle', () => {
   test('releases the handle after copying its value', async () => {
@@ -28,6 +28,25 @@ describe('readConsoleHandle', () => {
         },
       }),
     ).rejects.toThrow('circular');
+    expect(disposed).toBe(true);
+  });
+
+  test('the console listener path copies an object and releases its handle', async () => {
+    let disposed = false;
+    const text = await serializeConsoleMessage({
+      args: () => [
+        {
+          async jsonValue() {
+            return { ok: true };
+          },
+          async dispose() {
+            disposed = true;
+          },
+        },
+      ],
+      text: () => 'fallback',
+    });
+    expect(text).toBe('{ ok: true }');
     expect(disposed).toBe(true);
   });
 });

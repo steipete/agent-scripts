@@ -35,6 +35,49 @@ export async function readConsoleHandle(handle: {
   }
 }
 
+export function formatConsoleValue(value: unknown, depth = 0, maxDepth = 10): string {
+  if (depth > maxDepth) {
+    return '[Object]';
+  }
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'string') return `'${value}'`;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value === 'function') return '[Function]';
+  if (Array.isArray(value)) {
+    const items = value.map((item) => formatConsoleValue(item, depth + 1, maxDepth));
+    return `[ ${items.join(', ')} ]`;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value).map(([key, item]) => `${key}: ${formatConsoleValue(item, depth + 1, maxDepth)}`);
+    return entries.length > 0 ? `{ ${entries.join(', ')} }` : '{}';
+  }
+  return String(value);
+}
+
+export async function serializeConsoleMessage(msg: {
+  args: () => Array<{ jsonValue: () => Promise<unknown>; dispose?: () => Promise<void> | void }>;
+  text: () => string;
+}): Promise<string> {
+  try {
+    const values = await Promise.all(
+      msg.args().map(async (arg) => {
+        try {
+          return formatConsoleValue(await readConsoleHandle(arg));
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          if (errorMsg.includes('circular')) return '[Circular]';
+          if (errorMsg.includes('reference chain')) return '[DeepObject]';
+          return '[Unserializable]';
+        }
+      }),
+    );
+    return values.join(' ');
+  } catch {
+    return msg.text();
+  }
+}
+
 /** Utility type so TypeScript knows the async function constructor */
 type AsyncFunctionCtor = new (...args: string[]) => (...fnArgs: unknown[]) => Promise<unknown>;
 
@@ -537,55 +580,6 @@ program
       return now.toTimeString().split(' ')[0] + '.' + now.getMilliseconds().toString().padStart(3, '0');
     };
 
-    // Serialize value in Node.js util.inspect style with depth limit
-    const formatValue = (value: any, depth = 0, maxDepth = 10): string => {
-      if (depth > maxDepth) {
-        return '[Object]';
-      }
-
-      if (value === null) return 'null';
-      if (value === undefined) return 'undefined';
-      if (typeof value === 'string') return `'${value}'`;
-      if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-      if (typeof value === 'function') return '[Function]';
-
-      if (Array.isArray(value)) {
-        const items = value.map((v) => formatValue(v, depth + 1, maxDepth));
-        return `[ ${items.join(', ')} ]`;
-      }
-
-      if (typeof value === 'object') {
-        const entries = Object.entries(value).map(([k, v]) => `${k}: ${formatValue(v, depth + 1, maxDepth)}`);
-        return entries.length > 0 ? `{ ${entries.join(', ')} }` : '{}';
-      }
-
-      return String(value);
-    };
-
-    // Serialize console message arguments
-    const serializeArgs = async (msg: any): Promise<string> => {
-      try {
-        const args = msg.args();
-        const values = await Promise.all(
-          args.map(async (arg: any) => {
-            try {
-              const value = await readConsoleHandle(arg);
-              return formatValue(value);
-            } catch (error) {
-              const errorMsg = error instanceof Error ? error.message : String(error);
-              if (errorMsg.includes('circular')) return '[Circular]';
-              if (errorMsg.includes('reference chain')) return '[DeepObject]';
-              return '[Unserializable]';
-            }
-          })
-        );
-        return values.join(' ');
-      } catch {
-        // Fallback to text representation
-        return msg.text();
-      }
-    };
-
     const formatMessage = (type: string, text: string, location?: { url?: string; lineNumber?: number }) => {
       const color = typeColors[type] || white;
       const timestamp = formatTimestamp();
@@ -604,7 +598,7 @@ program
           return; // Filter out unwanted types
         }
 
-        const text = serialize ? await serializeArgs(msg) : msg.text();
+        const text = serialize ? await serializeConsoleMessage(msg) : msg.text();
         console.log(formatMessage(type, text, msg.location()));
       });
 
