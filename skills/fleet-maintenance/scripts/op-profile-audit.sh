@@ -127,7 +127,9 @@ token_path_ancestors_safe() {
   physical_home=$(cd "$HOME" && pwd -P) || return 1
   [[ "$physical_home" == "${HOME%/}" ]] || return 1
   [[ -d "$config_dir" && ! -L "$config_dir" ]] || return 1
-  [[ -d "$token_dir" && ! -L "$token_dir" ]]
+  path_mode_exclusively_writable "$config_dir" || return 1
+  [[ -d "$token_dir" && ! -L "$token_dir" ]] || return 1
+  path_mode_exclusively_writable "$token_dir"
 }
 
 canonical_profile_block() {
