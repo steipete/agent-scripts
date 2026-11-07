@@ -183,10 +183,9 @@ zprofile_loads_profile_token() {
       code = shell_code($0)
       if (code ~ /^[[:space:]]*(source|\.)[[:space:]]+"?[$]HOME\/\.profile"?[[:space:]]*$/ ||
           code ~ /^[[:space:]]*(source|\.)[[:space:]]+~\/\.profile[[:space:]]*$/) found = 1
-      else if (code ~ /^[[:space:]]*(source|\.)[[:space:]]+"[$]HOME\/\.config\/op\/molty-service-account-token"[[:space:]]*$/ ||
-               code ~ /^[[:space:]]*(source|\.)[[:space:]]+[$]HOME\/\.config\/op\/molty-service-account-token[[:space:]]*$/ ||
-               code ~ /^[[:space:]]*(source|\.)[[:space:]]+~\/\.config\/op\/molty-service-account-token[[:space:]]*$/) found = 1
-      else if (code ~ /^[[:space:]]*eval[[:space:]]/ && reads_token(code)) found = 1
+      else if (code ~ /^[[:space:]]*eval[[:space:]]/ &&
+               code ~ /(^|[[:space:];|&])(export[[:space:]]+)?OP_SERVICE_ACCOUNT_TOKEN=/ &&
+               (reads_token(code) || code ~ /[$]HOME\/\.profile/ || code ~ /~\/\.profile/)) found = 1
     }
     END { exit found ? 0 : 1 }
   ' "$zprofile"
