@@ -6,6 +6,12 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 ## Unreleased
 
+- Update Commander to 15.1.0, Puppeteer Core to 25.17.0, and youtube-transcript-plus to 2.0.4 without changing runtime floors.
+
+- Preserve Chrome profile data on copy failure, stop unsuccessful launches, release serialized console handles, and support SVG classes in the picker. Thanks @SebTardif! (#58, #62, #63, #64)
+- Reject empty timestamped subtitle output and clean temporary subtitles before failing. Thanks @SebTardif! (#57, #61)
+- Reject writable token configuration parents and remove their group/other write permissions during repair. Thanks @SebTardif! (#60)
+
 - release-mac-app: verify-appcast checks Sparkle signatures against SUPublicEDKey without a private key, read-only commands no longer require MAC_RELEASE_PACKAGE_CMD, and a missing Sparkle signing key now fails with a clear message instead of exiting silently.
 - Fail browser content/search navigation errors without extracting stale pages; retain loaded documents after network-idle timeouts. Thanks @SebTardif! (#49)
 - Verify restricted npm package versions with the temporary authenticated npmrc before and after publishing. Thanks @SebTardif! (#50)

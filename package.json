@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "commander": "^15.0.0",
-    "puppeteer-core": "^25.14.0"
+    "commander": "^15.1.0",
+    "puppeteer-core": "^25.17.0"
   }
 }

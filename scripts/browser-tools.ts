@@ -9,7 +9,7 @@
  */
 import { Command } from 'commander';
 import { execFileSync, execSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -19,6 +19,64 @@ import { stdin as input, stdout as output } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 import puppeteer, { type HTTPRequest } from 'puppeteer-core';
+
+export async function readConsoleHandle(handle: {
+  jsonValue: () => Promise<unknown>;
+  dispose?: () => Promise<void> | void;
+}): Promise<unknown> {
+  try {
+    return await handle.jsonValue();
+  } finally {
+    try {
+      await handle.dispose?.();
+    } catch {
+      // The value is already copied. A dispose failure must not replace it.
+    }
+  }
+}
+
+export function formatConsoleValue(value: unknown, depth = 0, maxDepth = 10): string {
+  if (depth > maxDepth) {
+    return '[Object]';
+  }
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'string') return `'${value}'`;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value === 'function') return '[Function]';
+  if (Array.isArray(value)) {
+    const items = value.map((item) => formatConsoleValue(item, depth + 1, maxDepth));
+    return `[ ${items.join(', ')} ]`;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value).map(([key, item]) => `${key}: ${formatConsoleValue(item, depth + 1, maxDepth)}`);
+    return entries.length > 0 ? `{ ${entries.join(', ')} }` : '{}';
+  }
+  return String(value);
+}
+
+export async function serializeConsoleMessage(msg: {
+  args: () => Array<{ jsonValue: () => Promise<unknown>; dispose?: () => Promise<void> | void }>;
+  text: () => string;
+}): Promise<string> {
+  try {
+    const values = await Promise.all(
+      msg.args().map(async (arg) => {
+        try {
+          return formatConsoleValue(await readConsoleHandle(arg));
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          if (errorMsg.includes('circular')) return '[Circular]';
+          if (errorMsg.includes('reference chain')) return '[DeepObject]';
+          return '[Unserializable]';
+        }
+      }),
+    );
+    return values.join(' ');
+  } catch {
+    return msg.text();
+  }
+}
 
 /** Utility type so TypeScript knows the async function constructor */
 type AsyncFunctionCtor = new (...args: string[]) => (...fnArgs: unknown[]) => Promise<unknown>;
@@ -33,6 +91,50 @@ function browserURL(port: number): string {
 
 async function connectBrowser(port: number) {
   return puppeteer.connect({ browserURL: browserURL(port), defaultViewport: null });
+}
+
+type DevtoolsSession = {
+  disconnect: () => Promise<void>;
+};
+
+export async function waitForDevtools(options: {
+  connect: () => Promise<DevtoolsSession>;
+  kill: () => void;
+  attempts?: number;
+  sleep?: (ms: number) => Promise<void>;
+}): Promise<boolean> {
+  const attempts = options.attempts ?? 30;
+  const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const browser = await options.connect();
+      await browser.disconnect();
+      return true;
+    } catch {
+      await sleep(500);
+    }
+  }
+  options.kill();
+  return false;
+}
+
+export function killDetachedProcess(pid: number | undefined): void {
+  if (!pid || pid <= 0) {
+    return;
+  }
+  if (process.platform !== 'win32') {
+    try {
+      process.kill(-pid, 'SIGTERM');
+      return;
+    } catch {
+      // Not a process-group leader, or it already exited.
+    }
+  }
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // The process already exited.
+  }
 }
 
 function resolveComparablePath(inputPath: string): string {
@@ -52,6 +154,58 @@ function pathsOverlap(first: string, second: string): boolean {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
+function pathExists(target: string): boolean {
+  try {
+    lstatSync(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStaging(staging: string): void {
+  rmSync(staging, { recursive: true, force: true });
+}
+
+function removeReplacedPath(target: string): void {
+  if (lstatSync(target).isSymbolicLink()) {
+    unlinkSync(target);
+    return;
+  }
+  rmSync(target, { recursive: true, force: true });
+}
+
+function stagingDirectoryBeside(target: string): string {
+  const parent = path.dirname(target);
+  mkdirSync(parent, { recursive: true });
+  return mkdtempSync(path.join(parent, `.${path.basename(target)}.profile-copy-staging-`));
+}
+
+function replaceWithStaging(target: string, staging: string): void {
+  const backup = `${staging}.replaced`;
+  let movedAside = false;
+  try {
+    if (pathExists(target)) {
+      renameSync(target, backup);
+      movedAside = true;
+    }
+    renameSync(staging, target);
+  } catch (error) {
+    if (movedAside && !pathExists(target)) {
+      try {
+        renameSync(backup, target);
+      } catch {
+        // The original directory stays at the backup path if it cannot be moved back.
+      }
+    }
+    removeStaging(staging);
+    throw error;
+  }
+  if (movedAside) {
+    removeReplacedPath(backup);
+  }
+}
+
 export function copyChromeProfile(sourceDir: string, profileDir: string): void {
   const source = realpathSync(sourceDir);
   if (!statSync(source).isDirectory()) {
@@ -68,25 +222,26 @@ export function copyChromeProfile(sourceDir: string, profileDir: string): void {
     throw new Error('Chrome profile destination symlink target does not exist');
   }
 
-  let destination = resolveComparablePath(profileDir);
+  const destination = resolveComparablePath(profileDir);
   if (pathsOverlap(source, destination) || pathsOverlap(destination, source)) {
     throw new Error('Chrome profile source and destination must not overlap');
   }
 
-  if (existsSync(profileDir) && statSync(profileDir).isDirectory()) {
-    for (const entry of readdirSync(destination)) {
-      rmSync(path.join(destination, entry), { recursive: true, force: true });
-    }
-  } else {
-    rmSync(profileDir, { recursive: true, force: true });
-    mkdirSync(profileDir, { recursive: true });
-    destination = resolveComparablePath(profileDir);
+  // Copy beside the destination first. A failed copy must leave that directory as it was.
+  const replacingDirectory = existsSync(profileDir) && statSync(profileDir).isDirectory();
+  const replaceTarget = replacingDirectory ? destination : profileDir;
+  const staging = stagingDirectoryBeside(replaceTarget);
+  try {
+    cpSync(source, staging, {
+      recursive: true,
+      force: true,
+      verbatimSymlinks: true,
+    });
+  } catch (error) {
+    removeStaging(staging);
+    throw error;
   }
-  cpSync(source, destination, {
-    recursive: true,
-    force: true,
-    verbatimSymlinks: true,
-  });
+  replaceWithStaging(replaceTarget, staging);
 }
 
 async function getActivePage(port: number) {
@@ -138,22 +293,20 @@ program
       copyChromeProfile(source, profileDir);
     }
 
-    spawn(chromePath, [`--remote-debugging-port=${port}`, `--user-data-dir=${profileDir}`, '--no-first-run', '--disable-popup-blocking'], {
-      detached: true,
-      stdio: 'ignore',
-    }).unref();
+    const child = spawn(
+      chromePath,
+      [`--remote-debugging-port=${port}`, `--user-data-dir=${profileDir}`, '--no-first-run', '--disable-popup-blocking'],
+      {
+        detached: true,
+        stdio: 'ignore',
+      },
+    );
+    child.unref();
 
-    let connected = false;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      try {
-        const browser = await connectBrowser(port);
-        await browser.disconnect();
-        connected = true;
-        break;
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-    }
+    const connected = await waitForDevtools({
+      connect: () => connectBrowser(port),
+      kill: () => killDetachedProcess(child.pid),
+    });
 
     if (!connected) {
       console.error(`✗ Failed to start Chrome on port ${port}`);
@@ -369,19 +522,34 @@ program
               });
             };
 
+            const readClassName = (className: unknown): string => {
+              if (typeof className === 'string') {
+                return className;
+              }
+              // SVG elements expose className as an SVGAnimatedString, not a string.
+              if (className !== null && typeof className === 'object' && 'baseVal' in className) {
+                const baseVal = (className as { baseVal?: unknown }).baseVal;
+                if (typeof baseVal === 'string') {
+                  return baseVal;
+                }
+              }
+              return '';
+            };
+
             const serialize = (el: HTMLElement) => {
               const parents: string[] = [];
               let current = el.parentElement;
               while (current && current !== document.body) {
                 const id = current.id ? `#${current.id}` : '';
-                const cls = current.className ? `.${current.className.trim().split(/\s+/).join('.')}` : '';
+                const clsName = readClassName(current.className);
+                const cls = clsName ? `.${clsName.trim().split(/\s+/).join('.')}` : '';
                 parents.push(`${current.tagName.toLowerCase()}${id}${cls}`);
                 current = current.parentElement;
               }
               return {
                 tag: el.tagName.toLowerCase(),
                 id: el.id || null,
-                class: el.className || null,
+                class: readClassName(el.className) || null,
                 text: el.textContent?.trim()?.slice(0, 200) || null,
                 html: el.outerHTML.slice(0, 500),
                 parents: parents.join(' > '),
@@ -522,55 +690,6 @@ program
       return now.toTimeString().split(' ')[0] + '.' + now.getMilliseconds().toString().padStart(3, '0');
     };
 
-    // Serialize value in Node.js util.inspect style with depth limit
-    const formatValue = (value: any, depth = 0, maxDepth = 10): string => {
-      if (depth > maxDepth) {
-        return '[Object]';
-      }
-
-      if (value === null) return 'null';
-      if (value === undefined) return 'undefined';
-      if (typeof value === 'string') return `'${value}'`;
-      if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-      if (typeof value === 'function') return '[Function]';
-
-      if (Array.isArray(value)) {
-        const items = value.map((v) => formatValue(v, depth + 1, maxDepth));
-        return `[ ${items.join(', ')} ]`;
-      }
-
-      if (typeof value === 'object') {
-        const entries = Object.entries(value).map(([k, v]) => `${k}: ${formatValue(v, depth + 1, maxDepth)}`);
-        return entries.length > 0 ? `{ ${entries.join(', ')} }` : '{}';
-      }
-
-      return String(value);
-    };
-
-    // Serialize console message arguments
-    const serializeArgs = async (msg: any): Promise<string> => {
-      try {
-        const args = msg.args();
-        const values = await Promise.all(
-          args.map(async (arg: any) => {
-            try {
-              const value = await arg.jsonValue();
-              return formatValue(value);
-            } catch (error) {
-              const errorMsg = error instanceof Error ? error.message : String(error);
-              if (errorMsg.includes('circular')) return '[Circular]';
-              if (errorMsg.includes('reference chain')) return '[DeepObject]';
-              return '[Unserializable]';
-            }
-          })
-        );
-        return values.join(' ');
-      } catch {
-        // Fallback to text representation
-        return msg.text();
-      }
-    };
-
     const formatMessage = (type: string, text: string, location?: { url?: string; lineNumber?: number }) => {
       const color = typeColors[type] || white;
       const timestamp = formatTimestamp();
@@ -589,7 +708,7 @@ program
           return; // Filter out unwanted types
         }
 
-        const text = serialize ? await serializeArgs(msg) : msg.text();
+        const text = serialize ? await serializeConsoleMessage(msg) : msg.text();
         console.log(formatMessage(type, text, msg.location()));
       });
 
