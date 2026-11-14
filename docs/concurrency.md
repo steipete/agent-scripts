@@ -1,9 +1,9 @@
 ---
-summary: Swift concurrency mental model: isolation first, async/await second.
+summary: "Swift concurrency mental model: isolation first, async/await second."
 read_when:
-  - Working with Swift async/await, actors, Task, TaskGroup, or Sendable
-  - Debugging data races or isolation issues in Swift code
-  - Understanding MainActor vs @concurrent vs nonisolated
+  - Working with Swift async/await, actors, Task, TaskGroup, or Sendable.
+  - Debugging data races or isolation issues in Swift code.
+  - Understanding MainActor vs @concurrent vs nonisolated.
 ---
 
 # Swift Concurrency (Approachable) - RepoBar Notes
