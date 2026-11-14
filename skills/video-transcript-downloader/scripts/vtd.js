@@ -247,21 +247,17 @@ async function cmdTranscript({ url, lang, timestamps, keepBrackets, extra }) {
     extra,
   });
 
+  let paragraph;
   try {
     const raw = fs.readFileSync(subtitlePath, "utf8");
     const segments = subtitlePath.endsWith(".srt") ? parseSrt(raw) : parseVtt(raw);
-    if (timestamps) {
-      // Subtitle timestamps are inconsistent across sites; keep output stable here.
-      const paragraph = toParagraph(segments, { keepBrackets });
-      process.stdout.write(paragraph + "\n");
-      return;
-    }
-    const paragraph = toParagraph(segments, { keepBrackets });
-    if (!paragraph) die("empty transcript from subtitles");
-    process.stdout.write(paragraph + "\n");
+    // Subtitle timestamps vary across sites; keep the fallback output as a paragraph.
+    paragraph = toParagraph(segments, { keepBrackets });
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+  if (!paragraph) die("empty transcript from subtitles");
+  process.stdout.write(paragraph + "\n");
 }
 
 async function cmdSubs({ url, lang, outputDir, extra }) {

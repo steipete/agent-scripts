@@ -11,7 +11,7 @@ description: "yt-dlp downloads: video, audio, subtitles, transcripts, clips, pla
 
 Transcript behavior:
 - YouTube: fetch via `youtube-transcript-plus` when possible.
-- Otherwise: pull subtitles via `yt-dlp`, then clean into a paragraph.
+- Otherwise: pull subtitles via `yt-dlp`, then clean into a paragraph, including with `--timestamps`. Empty cleaned subtitles exit with an error and remove their temporary files.
 
 ## Setup
 

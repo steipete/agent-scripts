@@ -127,7 +127,9 @@ token_path_ancestors_safe() {
   physical_home=$(cd "$HOME" && pwd -P) || return 1
   [[ "$physical_home" == "${HOME%/}" ]] || return 1
   [[ -d "$config_dir" && ! -L "$config_dir" ]] || return 1
-  [[ -d "$token_dir" && ! -L "$token_dir" ]]
+  path_mode_exclusively_writable "$config_dir" || return 1
+  [[ -d "$token_dir" && ! -L "$token_dir" ]] || return 1
+  path_mode_exclusively_writable "$token_dir"
 }
 
 canonical_profile_block() {
@@ -379,6 +381,7 @@ if [[ "$config_dir_owner" != "$(id -u)" ]]; then
   printf 'op-profile: refusing config directory owned by another account: %s\n' "$config_dir" >&2
   exit 2
 fi
+chmod go-w "$config_dir"
 if [[ -e "$token_dir" || -L "$token_dir" ]]; then
   if [[ ! -d "$token_dir" || -L "$token_dir" ]]; then
     printf 'op-profile: refusing non-directory token parent: %s\n' "$token_dir" >&2
