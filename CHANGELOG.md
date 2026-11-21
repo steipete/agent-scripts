@@ -6,6 +6,9 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 ## Unreleased
 
+- Clarify when to use the frontend-design skill. Thanks @visormatt! (#66)
+- Update Puppeteer Core to 25.18.1 and youtube-transcript-plus to 2.0.5, retaining the existing runtime floors.
+
 - Restore the Swift concurrency guide's documentation-index metadata. Thanks @diazMelgarejo! (#65)
 
 - Update Commander to 15.1.0, Puppeteer Core to 25.17.0, and youtube-transcript-plus to 2.0.4 without changing runtime floors.
