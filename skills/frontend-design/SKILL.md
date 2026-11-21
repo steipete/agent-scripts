@@ -1,6 +1,6 @@
 ---
 name: frontend-design
-description: "Frontend UI: pages, apps, components, polished non-generic design."
+description: "Create distinctive, production-grade frontend UI. Use when building web pages, apps, or components and design quality matters."
 license: Complete terms in LICENSE.txt
 ---
 
