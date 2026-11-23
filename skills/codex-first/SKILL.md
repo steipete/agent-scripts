@@ -24,12 +24,12 @@ codex exec resume "$SID" --dangerously-bypass-approvals-and-sandbox \
   --enable fast_mode -c 'service_tier="fast"' -o "$OUT" -
 ```
 
-- 6.2 Sol is API-only: the ChatGPT-account route returns 400 `model_not_found` (`not supported
-  when using Codex with a ChatGPT account`). `codex exec resume` uses the provider in force at
+- 6.2 Sol needs the API here: with codex-cli 0.164.0 the ChatGPT-account route returns 400
+  `model_not_found` (`not supported when using Codex with a ChatGPT account`). `codex exec resume` uses the provider in force at
   resume time, not the session's recorded one (codex-cli 0.164.0, 2026-11-23): a resume without
   the provider flag lands on the saved route and fails the same way.
-- No tier is advertised for 6.2 yet: Codex warns `service tier ... is not advertised` and omits
-  it, so 6.2 runs at the standard tier. Keep the Fast flags; they apply once the catalog lists
+- codex-cli 0.164.0 advertises no tier for 6.2: it warns `service tier ... is not advertised`
+  and omits it, so 6.2 runs at the standard tier. Keep the Fast flags; they apply once the catalog lists
   the tier. Codex also warns that 6.2 uses fallback model metadata; that is expected.
 - **Route fallback:** 6.2 or the direct provider unusable (that 400 on the API route, an access
   error, `provider auth command … exited`, 401/`Missing bearer`) → run the order on **GPT-6.1
