@@ -35,6 +35,8 @@ Use the same safe input policy for both direct-provider catalogue models ([GPT-6
 - `gpt-6-astra`
 - `gpt-6.1-sol`
 
+[GPT-6.2 Sol](https://developers.openai.com/api/docs/models/gpt-6.2-sol) is not a catalogue model yet: it is API-only (the ChatGPT route returns 400 `model_not_found`), and Codex 0.164.0 has no metadata for it to copy (`Model metadata for gpt-6.2-sol not found`), so its launches (`-m gpt-6.2-sol -c 'model_provider="openai_api_direct"'`) use Codex's fallback metadata and the base 500k window. Do not invent a catalogue entry or a 6.2 profile; add both once Codex ships genuine 6.2 metadata.
+
 Preserve the operator's selected supported model when configuring context. The examples below use Astra; enabling large context does not authorize replacing another selected model.
 
 Codex applies its normal 95% effective-window reserve to the 922,000-token input allowance, so it reports and guards about 875,900 usable tokens. Set automatic compaction to 700,000 total active tokens. That leaves about 175,900 tokens inside Codex's effective guard and 222,000 tokens before the provider's safe input ceiling for the next prompt, tool schemas and results, instructions, serialization overhead, and compaction itself. This larger margin is intentional: Codex 0.144.6 checks already-recorded context before adding the next user message and context updates, and a terminal response that crosses the threshold may not compact until the following turn. The observed large-context workload grew by about 144,000 tokens in one turn, which made the former 820,000 threshold too aggressive.
@@ -159,7 +161,7 @@ If it reports API-key login and the host needs Gmail, Calendar, or similar conne
 
 ## Fresh, resumed, and shared-server sessions
 
-`-m gpt-6-astra` selects a model, not a provider. Fresh sessions read the root `model_provider`; session metadata then records the chosen provider. Resuming preserves that recorded provider.
+`-m gpt-6-astra` selects a model, not a provider. Fresh sessions read the root `model_provider`; session metadata then records the chosen provider. `codex exec resume` does not reuse it: on codex-cli 0.164.0 it runs on the provider in force at resume time, root config or `-c model_provider=…` (verified 2026-11-23), so pass the provider on every exec resume.
 
 Codex TUI sessions can reuse `~/.codex/app-server-control/app-server-control.sock`. A shared app server retains the configuration it loaded at startup, so changing files on disk does not update sessions attached to an older server. After changing context or authentication configuration:
 

@@ -8,9 +8,11 @@ usage() {
   cat <<'EOF'
 Usage: codex-resume [options] <session-id | codex log with a "session id:" line>
 
-Resumes the session from its recorded cwd with full model/reasoning/tier flags.
+Resumes the session from its recorded cwd with full model/reasoning/tier/provider flags.
 On a rate limit or capacity error it switches between the primary and fallback
-model; when both are limited it backs off and retries.
+model; when both are limited it backs off and retries. If the primary's provider
+route is unusable (model access or provider authentication), it continues on the
+route fallback over the saved provider.
 
 Options:
   -p, --prompt FILE     follow-up prompt (default: a generic "continue" message)
@@ -18,7 +20,8 @@ Options:
   -o, --out FILE        final message (default: $XDG_STATE_HOME/codex-first/<sid>/last-message.md)
       --log-dir DIR     per-attempt logs (default: directory of --out)
       --cwd DIR         override the session's recorded cwd
-      --model M         starting model (default gpt-6.1-sol; fallback gpt-6-astra)
+      --model M         starting model (default gpt-6.2-sol on openai_api_direct;
+                        capacity fallback gpt-6-astra; route fallback gpt-6.1-sol)
       --tier T          starting service tier (default fast for both)
       --stop            stop a live worker on this session first, then resume
       --force           with --stop: stop even while git/landing commands run
@@ -36,8 +39,18 @@ die() { echo "codex-resume: $1" >&2; exit "${2:-2}"; }
 sid_arg="" prompt_file="" message="" out="" log_dir="" cwd=""
 stop=0 force=0 dry=0 max_attempts=12
 # A rate limit switches between these two; --model/--tier only pick where the run starts.
-primary_model="${CODEX_PRIMARY_MODEL:-gpt-6.1-sol}" primary_tier="${CODEX_PRIMARY_TIER:-fast}"
+primary_model="${CODEX_PRIMARY_MODEL:-gpt-6.2-sol}" primary_tier="${CODEX_PRIMARY_TIER:-fast}"
 fallback_model="${CODEX_FALLBACK_MODEL:-gpt-6-astra}" fallback_tier="${CODEX_FALLBACK_TIER:-fast}"
+# 6.2 Sol is API-only: the ChatGPT route answers 400 model_not_found. `codex exec resume` uses the
+# provider in force at resume time, not the session's recorded one, so pass it on every attempt.
+primary_provider="${CODEX_PRIMARY_PROVIDER-openai_api_direct}"
+# Model access or provider-auth failure on that route: continue once on this model, saved provider.
+route_fallback_model="gpt-6.1-sol"
+provider_flag() { # <model>: only the primary model runs on the primary provider
+  if [ "$1" = "$primary_model" ] && [ -n "$primary_provider" ]; then
+    printf '%s\n' -c "model_provider=\"$primary_provider\""
+  fi
+}
 # Ultrafast is served only below ~280k prompt tokens; compacting at 260k keeps workers on it.
 # Fast keeps Codex's own compaction unless CODEX_AUTO_COMPACT_TOKEN_LIMIT is set.
 compact_flag() { # <tier>
@@ -50,6 +63,8 @@ reasoning="${CODEX_REASONING:-high}"
 backoff="${CODEX_RESUME_BACKOFF:-180}" transport_wait="${CODEX_RESUME_TRANSPORT_WAIT:-30}"
 grace="${CODEX_RESUME_STOP_GRACE:-30}"
 # Git global options (`git -C "$WT" rebase`, `git -c k=v commit`) may precede the subcommand.
+# Codex's own error lines for a model the route cannot serve or a provider credential that fails.
+route_failure='^ERROR: .*(not supported when using Codex|model_not_found|does not exist or you do not have access|provider auth command|Missing bearer|Invalid API key|401 Unauthorized)'
 busy_pattern="${CODEX_RESUME_BUSY_PATTERN:-scripts/pr|git( +(-[cC] +[^ ]+|--[^ ]+))* +(push|rebase|merge|cherry-pick|am|commit)( |$)|gh pr (merge|create)}"
 codex_home="${CODEX_HOME:-$HOME/.codex}"
 
@@ -119,9 +134,10 @@ if [ "$dry" -eq 1 ]; then
   echo "cwd      $cwd"
   echo "live     ${live:-none}"
   echo "start    $model/$tier (reasoning $reasoning); on limit switches $primary_model/$primary_tier <-> $fallback_model/$fallback_tier"
+  echo "route    $primary_model via ${primary_provider:-the saved provider}, others via the saved provider; unusable route -> $route_fallback_model/$primary_tier"
   echo "out      $out"
   echo "logs     $log_dir/resume-<utc>-p<pid>-<n>.log"
-  echo "command  (cd $cwd && codex exec resume $sid --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -m $model -c model_reasoning_effort=\"$reasoning\" --enable fast_mode -c service_tier=\"$tier\" $(compact_flag "$tier" | tr '\n' ' ')-o $out - < <prompt>)"
+  echo "command  (cd $cwd && codex exec resume $sid --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -m $model $(provider_flag "$model" | tr '\n' ' ')-c model_reasoning_effort=\"$reasoning\" --enable fast_mode -c service_tier=\"$tier\" $(compact_flag "$tier" | tr '\n' ' ')-o $out - < <prompt>)"
   exit 0
 fi
 
@@ -176,11 +192,12 @@ for attempt in $(seq 1 "$max_attempts"); do
   log="$log_dir/resume-$(date -u +%Y%m%dT%H%M%SZ)-p$$-$attempt.log"
   # --skip-git-repo-check: sessions started outside a repo (scratch dirs) must resume too.
   (cd "$cwd" && command codex exec resume "$sid" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check \
-    -m "$cur_model" -c "model_reasoning_effort=\"$reasoning\"" \
+    -m "$cur_model" $(provider_flag "$cur_model") -c "model_reasoning_effort=\"$reasoning\"" \
     --enable fast_mode -c "service_tier=\"$cur_tier\"" \
     $(compact_flag "$cur_tier") \
     -o "$out" - < "$prompt") > "$log" 2>&1
   rc=$?
+  used_provider="$(provider_flag "$cur_model")"
   if [ "$rc" -eq 0 ]; then
     echo "codex-resume: finished session=$sid model=$cur_model/$cur_tier attempts=$attempt out=$out log=$log"
     exit 0
@@ -194,6 +211,11 @@ for attempt in $(seq 1 "$max_attempts"); do
     die "session $sid has another live writer (an orphaned codex?); pass --stop (rc=$rc); see $log" 4
   elif printf '%s\n' "$tail_text" | grep -Eq '^Error: thread/resume'; then
     die "backend refused to resume session $sid (rc=$rc): relaunch fresh with a self-contained order; see $log" 3
+  elif [ -n "$used_provider" ] && printf '%s\n' "$tail_text" | grep -Eq "$route_failure"; then
+    # Checked before transport: a failing auth helper also prints "Reconnecting... n/5" lines.
+    limited_in_a_row=0
+    primary_model="$route_fallback_model" primary_provider="" cur_model="$route_fallback_model" cur_tier="$primary_tier"
+    echo "codex-resume: attempt $attempt: provider route unusable; continuing on $cur_model/$cur_tier via the saved provider"
   elif printf '%s\n' "$tail_text" | grep -Eq '^ERROR: .*(Rate limit reached for|Selected model is at capacity|[Oo]verloaded)'; then
     limited_in_a_row=$((limited_in_a_row + 1))
     # The capacity error names no model; it always refers to the one this attempt used.

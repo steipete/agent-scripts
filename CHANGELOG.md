@@ -6,6 +6,7 @@ summary: Timeline of guardrail helper changes mirrored from Sweetistics and rela
 
 ## Unreleased
 
+- codex-first: default Codex workers to GPT-6.2 Sol on the `openai_api_direct` provider (it is API-only); pass the provider on every resume because `codex exec resume` does not reuse the recorded one; `codex-resume` falls back once to GPT-6.1 Sol on the saved provider when that route is unusable. codex-huge-context documents that 6.2 has no 1M catalogue entry yet.
 - Clarify when to use the frontend-design skill. Thanks @visormatt! (#66)
 - Update Puppeteer Core to 25.18.1 and youtube-transcript-plus to 2.0.5, retaining the existing runtime floors.
 

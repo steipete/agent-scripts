@@ -7,34 +7,49 @@ description: "Claude Code / OpenClaw-on-Claude work routing: delegate hands-on w
 
 ## Launch flags — read first, copy verbatim
 
-Default every Codex worker, **fresh or resumed**, to **GPT-6.1 Sol, high
-reasoning, Fast service tier** (`service_tier="fast"`, sent as API `priority`;
-Peter, 2026-10-30). Pass all three settings unless the user requests an override.
+Default every Codex worker, **fresh or resumed**, to **GPT-6.2 Sol, high
+reasoning, on the direct-API provider** (Peter, 2026-11-23), with the Fast tier
+flags (`service_tier="fast"`, sent as API `priority`; Peter, 2026-10-30). Pass all
+of them unless the user requests an override.
 
 ```bash
 # fresh
 codex exec --yolo -C "$WT" \
-  -m gpt-6.1-sol -c 'model_reasoning_effort="high"' \
+  -m gpt-6.2-sol -c 'model_provider="openai_api_direct"' -c 'model_reasoning_effort="high"' \
   --enable fast_mode -c 'service_tier="fast"' \
   -o "$OUT" - < "$ORDER"
-# resume: pass the same flags again; resume does not inherit them
+# resume: pass the same flags again; resume inherits none of them, not even the provider
 codex exec resume "$SID" --dangerously-bypass-approvals-and-sandbox \
-  -m gpt-6.1-sol -c 'model_reasoning_effort="high"' \
+  -m gpt-6.2-sol -c 'model_provider="openai_api_direct"' -c 'model_reasoning_effort="high"' \
   --enable fast_mode -c 'service_tier="fast"' -o "$OUT" -
 ```
 
+- 6.2 Sol is API-only: the ChatGPT-account route returns 400 `model_not_found` (`not supported
+  when using Codex with a ChatGPT account`). `codex exec resume` uses the provider in force at
+  resume time, not the session's recorded one (codex-cli 0.164.0, 2026-11-23): a resume without
+  the provider flag lands on the saved route and fails the same way.
+- No tier is advertised for 6.2 yet: Codex warns `service tier ... is not advertised` and omits
+  it, so 6.2 runs at the standard tier. Keep the Fast flags; they apply once the catalog lists
+  the tier. Codex also warns that 6.2 uses fallback model metadata; that is expected.
+- **Route fallback:** 6.2 or the direct provider unusable (that 400 on the API route, an access
+  error, `provider auth command … exited`, 401/`Missing bearer`) → run the order on **GPT-6.1
+  Sol, high, Fast** over the saved route (drop the provider flag) and say so in the report.
+  Never repair credentials ad hoc. `scripts/codex-resume` does this switch automatically.
 - Old Codex CLIs silently omit tiers they do not know (codex-cli 0.147 on Team warned
   `not advertised` and sent no tier); keep the CLI current. Verified on Team with 0.166.0,
   2026-10-30.
-- Ultrafast only on request: swap in `-c 'service_tier="ultrafast"'` and add
-  `-c 'model_auto_compact_token_limit=260000'`. It is served up to ~282k prompt tokens, flaky at
+- Ultrafast only on request, and only on 6.1 Sol (not advertised for 6.2): use `-m gpt-6.1-sol`
+  on a route whose catalog lists the tier (launch details), swap in
+  `-c 'service_tier="ultrafast"'`, and add `-c 'model_auto_compact_token_limit=260000'`. It is served up to ~282k prompt tokens, flaky at
   288–294k, and silently `fast` at ≥300k (measured 2026-10-13); the 260k cap keeps it there.
   Rollouts record only the requested tier; prove the served tier with a direct probe
   (`response.service_tier`). Details: [launch details](references/launch-details.md).
-- Context: workers get the base 500k window. Add `-p sol61-1m` (or `-p astra-1m`) only when the
-  order needs a whole-repo context; see `$codex-huge-context`.
-- Copy all model/reasoning/tier flags into wrappers; override only on user request. Verify launch
-  arguments (`fast` default; requested `ultrafast` is valid).
+- Context: workers get the base 500k window. Only when the order needs a whole-repo context,
+  launch with `-p sol61-1m` (or `-p astra-1m`) **instead of** the `-m`/`model_provider` flags:
+  CLI overrides beat the profile, and those profiles pin 6.1 Sol/Astra on the direct provider
+  because the 1M catalogue has no genuine 6.2 entry yet. See `$codex-huge-context`.
+- Copy all model/provider/reasoning/tier flags into wrappers; override only on user request.
+  Verify launch arguments (`fast` default; requested `ultrafast` is valid on 6.1 Sol).
 
 ### Security audits and cyber-classifier refusals → Daybreak Red (Peter, 2026-10-15/18)
 
@@ -56,9 +71,10 @@ models"). Don't rephrase to dodge the classifier or hop between regular models.
 
 ### Capacity fallback (Peter, 2026-10-12)
 
-Org caps `gpt-6.1-sol` at 40M tokens/min. Worker or resume fails with `Rate limit reached for
-gpt-6.1-sol ... tokens per min (TPM)`, `Selected model is at capacity`, or `overloaded` → resume
-that same session on **GPT-6 Astra, high, Fast** immediately (Peter, 2026-10-12: "use
+Org TPM caps apply per model (6.1 Sol: 40M tokens/min, 2026-10-12). Worker or resume fails with
+`Rate limit reached for <model> ... tokens per min (TPM)`, `Selected model is at capacity`, or
+`overloaded` → resume that same session on **GPT-6 Astra, high, Fast** (saved route, no provider
+flag) immediately (Peter, 2026-10-12: "use
 astra if sol has rate limits"); no waiting loop:
 
 ```bash
@@ -76,7 +92,7 @@ codex exec resume "$SID" --dangerously-bypass-approvals-and-sandbox \
 - Autoreview at capacity: `--model gpt-6-astra --thinking high --codex-speed fast`. If autoreview
   refuses because its provider/route doesn't match operator config, don't change config — review
   with a fresh-context subagent (diff + brief) and say so in the PR.
-- New workers still start on Sol 6.1 Fast; fall back per worker, only on the capacity error.
+- New workers still start on 6.2 Sol (direct API); fall back per worker, only on the capacity error.
 - Restarts and recoveries: this skill's `scripts/codex-resume` does the
   fallback, busy check, safe stop, and classified exits ([resume and watchdog](references/resume-and-watchdog.md)).
 
@@ -107,7 +123,7 @@ not hands-on self-delegation. Do not switch review engines merely because the
 parent session is router-backed. This exception takes precedence over the gate
 below.
 
-Use the autoreview helper with `--engine codex` (defaults: 6.1 Sol, medium, Ultrafast) unless the user requests an override. It tries the ChatGPT subscription first and, on an auth failure, retries once on the configured direct-API provider; pass `--codex-config 'model_provider="openai_api_direct"'` only to skip the subscription attempt. Preserve the helper's reviewer isolation.
+Use the autoreview helper with `--engine codex` and its own model and route defaults (`$autoreview` owns them) unless the user requests an override. Its `--codex-config 'model_provider="…"'` selector must match the root `model_provider` in `~/.codex/config.toml`; it refuses any other provider. Preserve the helper's reviewer isolation.
 
 For direct hands-on delegation, use this skill only when the session is running
 on a native Claude model and can run shell commands: Claude Code, or an OpenClaw
@@ -146,7 +162,7 @@ agents on GPT): do not invoke Codex CLI for hands-on self-delegation. Continue t
 instruction that merely mentions `$codex-first`; it does not override the
 autoreview exception above.
 
-The default worker is GPT-6.1 Sol on the Fast tier. Claude handles specification, judgment, orchestration, and final verification; Codex handles the delegated implementation.
+The default worker is GPT-6.2 Sol on the direct-API provider. Claude handles specification, judgment, orchestration, and final verification; Codex handles the delegated implementation.
 
 ## Route
 
@@ -193,8 +209,8 @@ Portfolio/multi-repo work: `$maintainer-orchestrator` instead.
 ## Invoke
 
 - Run `timeout 8 git --version`; for an Xcode-beta hang, set `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` in the session and every order.
-- For `openai_api_direct`, run `$codex-huge-context`'s `scripts/preflight.rb` (via `ruby`) before the batch's first fresh/resumed launch. If Keychain delivery fails, stop; never override the provider or use ordinary Codex auth.
-- Keep the configured provider; resume inherits it. If incompatible with 6.1 Sol, start fresh; never silently change models.
+- When the saved config selects `openai_api_direct`, run `$codex-huge-context`'s `scripts/preflight.rb` (via `ruby`) before the batch's first fresh/resumed launch. If Keychain delivery fails, stop; never override that saved provider or use ordinary Codex auth.
+- Resume does not inherit the provider: pass it on every launch. Change models only through the documented route and capacity fallbacks, and report each switch.
 - Use repo-scoped `--yolo`, temp-file prompts (never inline quoting), and `-o` results (not JSONL).
 - **OpenClaw agents:** launch each worker as a background exec and poll its `-o`
   file; never block a turn on a long `codex exec`.

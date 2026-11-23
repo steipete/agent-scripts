@@ -5,18 +5,19 @@ Read for Ultrafast/interactive launches, catalog checks, or a missing CLI. The [
 ### Optional Ultrafast
 
 Fast (`service_tier="fast"`, sent as API `priority`) is the default tier
-(Peter, 2026-10-30). When the user asks for Ultrafast, replace
-`-c 'service_tier="fast"'` with `-c 'service_tier="ultrafast"'` and add
+(Peter, 2026-10-30). No tier is advertised for the default 6.2 Sol yet, so Codex
+omits it and 6.2 runs at the standard tier. Ultrafast therefore means 6.1 Sol:
+when the user asks for it, use `-m gpt-6.1-sol`, replace
+`-c 'service_tier="fast"'` with `-c 'service_tier="ultrafast"'`, and add
 `-c 'model_auto_compact_token_limit=260000'` in the fresh/resume recipes. Keep
-6.1 Sol, high reasoning, `--enable fast_mode`, and the existing provider and
-execution policy. Do not promote either tier into the base `config.toml`; the
-launch flags own the tier.
+high reasoning, `--enable fast_mode`, and the execution policy. Do not promote
+either tier into the base `config.toml`; the launch flags own the tier.
 
 For an interactive session, use the same per-launch flags:
 
 ```bash
-codex --no-daemon -m gpt-6.1-sol -c 'model_reasoning_effort="high"' \
-  --enable fast_mode -c 'service_tier="fast"'
+codex --no-daemon -m gpt-6.2-sol -c 'model_provider="openai_api_direct"' \
+  -c 'model_reasoning_effort="high"' --enable fast_mode -c 'service_tier="fast"'
 ```
 
 An optional `ultrafast.config.toml` profile in `CODEX_HOME` may instead contain
@@ -34,6 +35,7 @@ calling a run Ultrafast; verified 2026-10-10 on the direct API route. After an
 approved custom-catalog refresh, `--no-daemon` loads it in a fresh process. See
 the official
 [configuration reference](https://developers.openai.com/codex/config-reference/),
+[GPT-6.2 Sol](https://developers.openai.com/api/docs/models/gpt-6.2-sol) and
 [GPT-6.1 Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol),
 and [Ultrafast API guide](https://developers.openai.com/api/docs/guides/ultrafast-mode).
 
@@ -46,7 +48,7 @@ P=$(mktemp); cat >"$P" <<'EOF'
 <goal, repo + key paths, constraints ("don't touch X"), non-goals, proof expected, output shape>
 EOF
 command codex exec --yolo -C <repo> \
-  -m gpt-6.1-sol -c 'model_reasoning_effort="high"' \
+  -m gpt-6.2-sol -c 'model_provider="openai_api_direct"' -c 'model_reasoning_effort="high"' \
   --enable fast_mode -c 'service_tier="fast"' \
   -o /tmp/codex-last.md - <"$P" 2>/dev/null
 ```
@@ -72,7 +74,7 @@ command codex exec --yolo -C <repo> \
 
 If the saved configuration selects the `openai_api_direct` route, run `$codex-huge-context`'s `scripts/preflight.rb` (via `ruby`) before the first fresh or resumed launch in the batch. Fail closed if it cannot deliver the Keychain credential; never work around it by overriding the provider or using ordinary Codex authentication.
 
-- These overrides select the model and service tier, not the provider. Resumed sessions retain their recorded provider; use a fresh worker if it is incompatible with 6.1 Sol. Do not silently fall back to another model.
+- `-m` selects the model, not the provider; 6.2 Sol needs `-c 'model_provider="openai_api_direct"'` on every fresh and resumed launch. `codex exec resume` uses the provider in force at resume time, not the session's recorded one (verified on codex-cli 0.164.0, 2026-11-23, both directions: a direct-API session resumed without the flag ran on the ChatGPT route, and a ChatGPT-route session resumed with it ran on the API). Do not silently fall back to another model; use the documented route and capacity fallbacks and report the switch.
 - `--yolo` is the house default; Codex may run commands/tests freely. Keep prompts scoped to the target repo.
 - If `--yolo` is unavailable—either the CLI rejects the flag or the selected model/backend rejects unrestricted execution—replace it with `--approve-for-me` and retry once. Never pass both. Preserve every other argument and constraint.
 - Prompt via temp file, never inline quoting; read the `-o` result, not the JSONL stream.

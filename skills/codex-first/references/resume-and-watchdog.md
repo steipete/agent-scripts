@@ -19,7 +19,9 @@ $R --model gpt-6-astra --tier fast -o "$OUT" "$SID" # start on the fallback whil
 It owns the traps below so wrappers don't have to:
 
 - **Same session, right place.** Finds the rollout under `$CODEX_HOME/sessions`, resumes from the
-  cwd recorded in its `session_meta` (resume has no `-C`), and re-passes model, reasoning, tier, and `-o`.
+  cwd recorded in its `session_meta` (resume has no `-C`), and re-passes model, provider, reasoning,
+  tier, and `-o`. The primary 6.2 Sol runs on `openai_api_direct` (`CODEX_PRIMARY_PROVIDER`; empty
+  keeps the saved provider); every other model runs on the saved provider.
 - **Busy check.** A live codex keeps its rollout file open, so `lsof` on it identifies the exact
   worker, whether it started fresh or resumed. Without `--stop` a live session exits 4 instead of
   forking a second writer. `--stop` sends INT, then TERM, then KILL, only to the processes that hold
@@ -27,8 +29,12 @@ It owns the traps below so wrappers don't have to:
 - **Never mid-landing.** `--stop` refuses (exit 5) while a descendant runs `scripts/pr`,
   `git push/rebase/merge/cherry-pick/am/commit`, or `gh pr merge/create`; an interrupted
   `scripts/pr` checkout once left a zero-byte file on a PR. `--force` overrides.
+- **Route fallback.** On the primary's provider, a 400 `model_not_found`/`not supported when using
+  Codex`, an access error, `provider auth command`, `Missing bearer`, `Invalid API key`, or
+  `401 Unauthorized` switches once to 6.1 Sol (Fast) on the saved provider, which then stays the
+  primary. Checked before transport, because a failing auth helper also prints `Reconnecting…`.
 - **Capacity fallback.** `Rate limit reached for …`, `Selected model is at capacity`, or
-  `overloaded` switches between Sol 6.1 and Astra 6 (both Fast); when
+  `overloaded` switches between the primary (6.2 Sol) and Astra 6 (both Fast); when
   both are limited it sleeps 180 s, then 360, 540, 720 s between rounds.
   A transport death (`stream disconnected`, exhausted reconnects) retries the same model after 30 s.
   Retries send a short "continue" message; the follow-up is already in the session.
@@ -47,7 +53,7 @@ For follow-up fixes, resume from the repo directory with the same model, reasoni
 ```bash
 (cd <repo> && command codex exec resume <session-id> \
   --dangerously-bypass-approvals-and-sandbox \
-  -m gpt-6.1-sol -c 'model_reasoning_effort="high"' \
+  -m gpt-6.2-sol -c 'model_provider="openai_api_direct"' -c 'model_reasoning_effort="high"' \
   --enable fast_mode -c 'service_tier="fast"' \
   -o /tmp/codex-last.md - <"$P2" 2>/dev/null)
 ```
@@ -74,9 +80,10 @@ For follow-up fixes, resume from the repo directory with the same model, reasoni
   the temp-file pattern (`- <"$P2"`). The resumed worker keeps its full prior
   context, so the follow-up prompt should state only the delta: the decision,
   the amended constraint, what still stands, and the required report.
-- **Overrides are per launch.** Model, reasoning effort, service tier, and
-  `-o` are not remembered; re-pass all of them. The recorded provider and
-  sandbox policy are inherited from the original session.
+- **Overrides are per launch.** Model, provider, reasoning effort, service
+  tier, and `-o` are not remembered; re-pass all of them. Resume uses the
+  provider in force at resume time, not the recorded one (verified on
+  codex-cli 0.164.0, 2026-11-23); the sandbox policy is inherited.
 - **Resume can be refused for a long thread.** `Error: thread/resume: thread/resume
   failed: list_turns is not supported yet (code -32601)` means the backend cannot
   rehydrate that session (seen after ~400k tokens of tool output). The command
@@ -95,7 +102,7 @@ For runs you must not babysit, trade the stderr suppression for a log and watch 
 
 ```bash
 command codex exec --yolo -C <repo> \
-  -m gpt-6.1-sol -c 'model_reasoning_effort="high"' \
+  -m gpt-6.2-sol -c 'model_provider="openai_api_direct"' -c 'model_reasoning_effort="high"' \
   --enable fast_mode -c 'service_tier="fast"' \
   -o "$OUT" - <"$P" > "$LOG" 2>&1
 # Claude Code: run the line above as its own Bash run_in_background call

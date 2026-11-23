@@ -38,9 +38,13 @@ case "$(sed -n "${n}p" "$STUB/plan")" in
   usage) echo "error: unexpected argument '-C' found"; echo "Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]"; exit 2 ;;
   listturns) echo "Error: thread/resume: thread/resume failed: list_turns is not supported yet (code -32601)"; exit 1 ;;
   transport) echo "ERROR: stream disconnected before completion"; exit 1 ;;
+  routemodel) echo "ERROR: {\"type\":\"error\",\"status\":400,\"error\":{\"message\":\"The '$model' model is not supported when using Codex with a ChatGPT account.\",\"code\":\"model_not_found\"}}"; exit 1 ;;
+  authhelper) for i in 1 2 3 4 5; do echo "ERROR: Reconnecting... $i/5"; done
+    echo "ERROR: provider auth command \`/x/helper\` exited with status exit status: 1"; exit 1 ;;
   toolnoise) echo "session id: stub"; echo "exec: pnpm foo -C bar"; echo "error: unexpected argument '-C' found"
     echo "Rate limit reached for gpt-test (from a test log)"; echo "Reconnecting... 2/5 (tool output)"
-    echo "doc: list_turns is not supported yet"; echo "doc: Selected model is at capacity"; exit 1 ;;
+    echo "doc: list_turns is not supported yet"; echo "doc: Selected model is at capacity"
+    echo "doc: model_not_found, not supported when using Codex, provider auth command"; exit 1 ;;
   *) echo "something unexpected"; exit 1 ;;
 esac
 EOF
@@ -58,26 +62,27 @@ setup dry ok; run --dry-run "$sid"
 check "dry-run exits 0" '[ "$rc" -eq 0 ]'
 check "dry-run resolves cwd from session_meta" 'grep -q "cwd      $root/wt" "$STUB/stdout"'
 check "dry-run runs nothing" '[ "$(calls)" -eq 0 ]'
+check "dry-run shows the primary provider" 'grep -q -- "-m gpt-6.2-sol -c model_provider=\"openai_api_direct\" -c model_reasoning_effort" "$STUB/stdout"'
 
 setup ok ok; run --message "decision: land it" "$sid"
 check "ok exits 0" '[ "$rc" -eq 0 ]'
-check "resume flags, no -C" 'argv 1 | grep -q "^exec resume $sid --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -m gpt-6.1-sol -c model_reasoning_effort=\"high\" --enable fast_mode -c service_tier=\"fast\" -o " && ! argv 1 | grep -q -- " -C "'
+check "resume flags, no -C" 'argv 1 | grep -q "^exec resume $sid --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -m gpt-6.2-sol -c model_provider=\"openai_api_direct\" -c model_reasoning_effort=\"high\" --enable fast_mode -c service_tier=\"fast\" -o " && ! argv 1 | grep -q -- " -C "'
 check "runs in the recorded cwd" '[ "$(sed -n 1p "$STUB/cwd")" = "$root/wt" ]'
 check "sends the follow-up" 'grep -q "decision: land it" "$STUB/stdin.1"'
 check "writes the final message" 'grep -q "final report" "$XDG_STATE_HOME/codex-first/$sid/last-message.md"'
 
 setup fallback ratelimit ok; run --message "decision: land it" "$sid"
 check "rate limit then ok exits 0" '[ "$rc" -eq 0 ]'
-check "falls back to astra fast" 'argv 2 | grep -q "\-m gpt-6-astra .*service_tier=\"fast\""'
+check "falls back to astra fast on the saved provider" 'argv 2 | grep -q "\-m gpt-6-astra .*service_tier=\"fast\"" && ! argv 2 | grep -q model_provider'
 check "retry sends continue, not the follow-up again" 'grep -q "rate-limit or transport" "$STUB/stdin.2" && ! grep -q "decision" "$STUB/stdin.2"'
 
 setup flipback ratelimit capacity ok; run "$sid"
 check "both limited then ok exits 0" '[ "$rc" -eq 0 ]'
-check "returns to sol fast after astra limit" 'argv 3 | grep -q "\-m gpt-6.1-sol .*service_tier=\"fast\""'
+check "returns to sol fast after astra limit" 'argv 3 | grep -q "\-m gpt-6.2-sol -c model_provider=\"openai_api_direct\" .*service_tier=\"fast\""'
 
 setup start-astra ratelimit ok; run --model gpt-6-astra --tier ultrafast "$sid"
 check "requested ultrafast keeps the 260k compact cap" 'argv 1 | grep -q "\-m gpt-6-astra .*service_tier=\"ultrafast\" -c model_auto_compact_token_limit=260000 -o "'
-check "astra start falls back to sol" 'argv 2 | grep -q "\-m gpt-6.1-sol .*service_tier=\"fast\" -o "'
+check "astra start falls back to sol" 'argv 2 | grep -q "\-m gpt-6.2-sol -c model_provider=\"openai_api_direct\" .*service_tier=\"fast\" -o "'
 
 setup overloaded overloaded ok; run "$sid"
 check "overloaded switches models" '[ "$rc" -eq 0 ] && argv 2 | grep -q "\-m gpt-6-astra"'
@@ -92,7 +97,26 @@ setup listturns listturns ok; run "$sid"
 check "refused resume exits 3" '[ "$rc" -eq 3 ] && grep -q "relaunch fresh" "$STUB/stderr"'
 
 setup transport transport ok; run "$sid"
-check "transport retry keeps the model" '[ "$rc" -eq 0 ] && argv 2 | grep -q "\-m gpt-6.1-sol"'
+check "transport retry keeps the model" '[ "$rc" -eq 0 ] && argv 2 | grep -q "\-m gpt-6.2-sol -c model_provider"'
+
+setup routemodel routemodel ok; run --message "decision: land it" "$sid"
+check "unservable primary continues on 6.1 via the saved provider" '[ "$rc" -eq 0 ] && argv 2 | grep -q "\-m gpt-6.1-sol -c model_reasoning_effort=\"high\" --enable fast_mode -c service_tier=\"fast\" -o " && ! argv 2 | grep -q model_provider'
+check "route retry sends continue, not the follow-up again" 'grep -q "rate-limit or transport" "$STUB/stdin.2" && ! grep -q "decision" "$STUB/stdin.2"'
+
+setup authhelper authhelper ok; run "$sid"
+check "provider auth failure is a route failure, not transport" '[ "$rc" -eq 0 ] && [ "$(calls)" -eq 2 ] && argv 2 | grep -q "\-m gpt-6.1-sol" && grep -q "provider route unusable" "$STUB/stdout"'
+
+setup routeonce routemodel routemodel ok; run "$sid"
+check "route fallback happens once, then stays unclassified" '[ "$rc" -eq 1 ] && [ "$(calls)" -eq 2 ]'
+
+setup routecap routemodel ratelimit capacity ok; run "$sid"
+check "after a route fallback, capacity flips between 6.1 and astra" '[ "$rc" -eq 0 ] && argv 3 | grep -q "\-m gpt-6-astra" && argv 4 | grep -q "\-m gpt-6.1-sol" && ! argv 4 | grep -q model_provider'
+
+setup explicit61 routemodel ok; run --model gpt-6.1-sol "$sid"
+check "non-primary model uses the saved provider and gets no route fallback" '[ "$rc" -eq 1 ] && [ "$(calls)" -eq 1 ] && ! argv 1 | grep -q model_provider'
+
+setup noprovider ok; CODEX_PRIMARY_PROVIDER="" run "$sid"
+check "empty CODEX_PRIMARY_PROVIDER keeps the saved provider" '[ "$rc" -eq 0 ] && ! argv 1 | grep -q model_provider'
 
 setup toolnoise toolnoise ok; run "$sid"
 check "tool output that mimics codex errors stays unclassified" '[ "$rc" -eq 1 ] && [ "$(calls)" -eq 1 ]'
