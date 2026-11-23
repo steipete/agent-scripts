@@ -29,8 +29,9 @@ codex exec resume "$SID" --dangerously-bypass-approvals-and-sandbox \
   resume time, not the session's recorded one (codex-cli 0.164.0, 2026-11-23): a resume without
   the provider flag lands on the saved route and fails the same way.
 - codex-cli 0.164.0 advertises no tier for 6.2: it warns `service tier ... is not advertised`
-  and omits it, so 6.2 runs at the standard tier. Keep the Fast flags; they apply once the catalog lists
-  the tier. Codex also warns that 6.2 uses fallback model metadata; that is expected.
+  and omits it, so 6.2 runs at the standard tier. codex-cli 0.171.0 (Peter's Mac since
+  2026-11-23) accepts `fast` for 6.2 without that warning. Keep the Fast flags. Older CLIs also
+  warn that 6.2 uses fallback model metadata; that is expected.
 - **Route fallback:** 6.2 or the direct provider unusable (that 400 on the API route, an access
   error, `provider auth command … exited`, 401/`Missing bearer`) → run the order on **GPT-6.1
   Sol, high, Fast** over the saved route (drop the provider flag) and say so in the report.
@@ -51,23 +52,43 @@ codex exec resume "$SID" --dangerously-bypass-approvals-and-sandbox \
 - Copy all model/provider/reasoning/tier flags into wrappers; override only on user request.
   Verify launch arguments (`fast` default; requested `ultrafast` is valid on 6.1 Sol).
 
-### Security audits and cyber-classifier refusals → Daybreak Red (Peter, 2026-10-15/18)
+### Security audits and cyber-classifier stops → Daybreak (Peter, 2026-10-15/18; reworked 2026-11-23)
 
-Security audit lanes (threat models, injection/secret-exposure audits, permission inventories,
-security review of hardening diffs) launch on **Daybreak Red** from the start (Peter 2026-10-18:
-"use daylight red model for security audits"). Implementation workers stay on Sol.
+Daybreak is a per-request access program (`access_programs.cyber`), not a model. The
+`gpt-daybreak-{blue,red}-latest` aliases are retired (404 `model_not_found`). Entitlement belongs
+to the API project; selecting a program grants nothing.
 
-Worker stops with `This content was flagged for possible cybersecurity risk` → relaunch or resume
-the same order on **Daybreak Red** (Peter: "use daybreak red if you hit a blocker with regular
-models"). Don't rephrase to dodge the classifier or hop between regular models.
+- Security audit lanes (threat models, injection/secret-exposure audits, permission inventories,
+  security review of hardening diffs) launch on **Red** from the start (Peter 2026-10-18: "use
+  daylight red model for security audits"). Implementation workers stay on Sol at Standard.
+- Worker stops with `This content was flagged for possible cybersecurity risk` → resume the same
+  session on **Blue** with the same model; still flagged → resume on **Red** (Peter: "use
+  daybreak red if you hit a blocker with regular models"). Don't rephrase to dodge the classifier
+  or hop between regular models.
 
-- Direct API only: the ChatGPT-account route returns 400 `not supported when using Codex with a
-  ChatGPT account`. Add `-c 'model_provider="openai_api_direct"'` (API key via the provider's
-  auth command in `~/.codex/config.toml`).
-- Slug: the `model_catalog_json` entry whose `display_name` is `Daybreak Red`. Keep it out of
-  public artifacts (commits, PRs, issues, logs) per public model naming.
-- No Fast/Ultrafast tier: drop `--enable fast_mode` / `service_tier`; keep `model_reasoning_effort="high"`.
-- Verified 2026-10-15 with a one-line `codex exec` probe on the direct provider.
+```bash
+CYBER=(-c 'model_provider="openai_api_direct"' -c 'model_providers.openai_api_direct.capabilities.cyber_access_programs=true')
+# Blue: same model, reduced refusals
+codex exec resume "$SID" --dangerously-bypass-approvals-and-sandbox -m gpt-6.2-sol "${CYBER[@]}" \
+  --cyber-access-program daybreak_blue -c 'model_reasoning_effort="high"' -o "$OUT" -
+# Red: purpose-trained cyber model (audits, or Blue still flagged)
+codex exec --yolo -C "$WT" -m gpt-6-cyber "${CYBER[@]}" \
+  --cyber-access-program daybreak_red -c 'model_reasoning_effort="high"' -o "$OUT" - < "$ORDER"
+```
+
+- Needs codex-cli ≥0.171.0. On the custom direct provider, Codex **silently drops**
+  `--cyber-access-program` unless the provider declares `capabilities.cyber_access_programs = true`
+  (the `-c` above, or the same key in `~/.codex/config.toml`), and the turn runs at Standard.
+  Prove a new host once: `-m gpt-6-cyber --cyber-access-program standard` must fail with
+  400 `invalid_access_program`; success means the program never reached the API.
+- `-c daybreak=true` and `/daybreak` refuse custom-auth providers; use `--cyber-access-program`.
+- `daybreak_blue` goes on mainline models (6.2/6.1/6 Sol, Astra, Terra, Luna); `daybreak_red` only on
+  cyber models (`gpt-6-cyber`, `gpt-5.6-cyber`). A mismatch returns 400 `invalid_access_program`
+  naming the right program. Omitted, `gpt-6.2-sol` runs at Standard.
+- Launch Red without the Fast flags. A 403 `access_program_not_enabled` means the key's project
+  lacks the program (default projects never have it): use a key from an enabled project.
+- Verify access with benign pings and status codes only; an exploit-writing probe trips the
+  classifier.
 
 ### Capacity fallback (Peter, 2026-10-12)
 
