@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.12,<3.13"
-# dependencies = ["google-genai", "Pillow"]
+# dependencies = ["google-genai>=3.6.1", "Pillow"]
 # ///
 """
 nanobanana - Image editing with Gemini's Nano Banana 2 API
@@ -51,7 +51,7 @@ def edit_image(image_path: str, prompt: str, output_path: str | None = None) -> 
 
     try:
         response = client.models.generate_content(
-            model="gemini-3.1-flash-image-preview",
+            model="gemini-3.1-flash-image",
             contents=[prompt, image],
             config=genai.types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
         )

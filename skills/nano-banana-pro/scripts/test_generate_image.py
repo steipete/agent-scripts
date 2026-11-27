@@ -22,18 +22,9 @@ generator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(generator)
 
 
-class OutputTests(unittest.TestCase):
-    def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name).resolve()
-        self.workspace = self.root / "workspace"
-        self.workspace.mkdir()
-        self.victim = self.root / "victim.txt"
-        self.victim.write_bytes(b"SAFE SENTINEL\n")
-        self.original_open = os.open
-
-    def run_cli(self, output, modes=("RGB",), encoded=False):
+class CLITestCase(unittest.TestCase):
+    def run_cli(self, output, modes=("RGB",), encoded=False, *, extra_args=(), env=None):
+        self.calls = []
         parts = [types.SimpleNamespace(text="synthetic response", inline_data=None)]
         for mode in modes:
             data = io.BytesIO()
@@ -44,8 +35,13 @@ class OutputTests(unittest.TestCase):
             parts.append(types.SimpleNamespace(
                 text=None, inline_data=types.SimpleNamespace(data=payload)
             ))
+
+        def generate_content(**kwargs):
+            self.calls.append(kwargs)
+            return types.SimpleNamespace(parts=parts)
+
         client = types.SimpleNamespace(models=types.SimpleNamespace(
-            generate_content=lambda **kwargs: types.SimpleNamespace(parts=parts)
+            generate_content=generate_content
         ))
         genai = types.ModuleType("google.genai")
         genai.Client = lambda **kwargs: client
@@ -56,15 +52,32 @@ class OutputTests(unittest.TestCase):
         google = types.ModuleType("google")
         google.genai = genai
         output_log = io.StringIO()
-        with patch.dict(sys.modules, {"google": google, "google.genai": genai}), \
-                patch.object(sys, "argv", ["generate_image.py", "--prompt", "fixture",
-                                          "--api-key", "synthetic", "--filename", str(output)]), \
+        argv = ["generate_image.py", "--prompt", "fixture", "--api-key", "synthetic",
+                "--filename", str(output), *extra_args]
+        with patch.dict(os.environ), \
+                patch.dict(sys.modules, {"google": google, "google.genai": genai}), \
+                patch.object(sys, "argv", argv), \
                 redirect_stdout(output_log), redirect_stderr(output_log):
+            os.environ.pop("NANO_BANANA_MODEL", None)
+            if env is not None:
+                os.environ.update(env)
             try:
                 generator.main()
             except SystemExit as error:
                 return error.code, output_log.getvalue()
         return 0, output_log.getvalue()
+
+
+class OutputTests(CLITestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.workspace = self.root / "workspace"
+        self.workspace.mkdir()
+        self.victim = self.root / "victim.txt"
+        self.victim.write_bytes(b"SAFE SENTINEL\n")
+        self.original_open = os.open
 
     def assert_rejected(self, output):
         code, log = self.run_cli(output)
@@ -166,6 +179,49 @@ class OutputTests(unittest.TestCase):
         code, log = self.run_cli(self.workspace / "absent.png", modes=())
         self.assertEqual(code, 1, log)
         self.assertFalse((self.workspace / "absent.png").exists())
+
+
+class ModelSelectionTests(CLITestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.output = Path(temporary.name).resolve() / "result.png"
+
+    def assert_model(self, expected, **kwargs):
+        code, log = self.run_cli(self.output, **kwargs)
+        self.assertEqual(code, 0, log)
+        self.assertEqual([call["model"] for call in self.calls], [expected])
+        self.assertTrue(self.output.is_file())
+
+    def test_default_model(self):
+        self.assert_model("gemini-3.1-flash-image")
+
+    def test_env_alias(self):
+        self.assert_model("gemini-3-pro-image", env={"NANO_BANANA_MODEL": "pro"})
+
+    def test_flag_overrides_env(self):
+        self.assert_model(
+            "gemini-3-pro-image",
+            extra_args=("--model", "gemini-3-pro-image"),
+            env={"NANO_BANANA_MODEL": "flash"},
+        )
+
+    def test_flag_alias_is_case_insensitive(self):
+        self.assert_model("gemini-3-pro-image", extra_args=("--model", "PRO"))
+
+    def test_flag_model_id_passes_through(self):
+        self.assert_model(
+            "gemini-2.5-flash-image", extra_args=("--model", "gemini-2.5-flash-image")
+        )
+
+    def test_blank_env_falls_back_to_default(self):
+        self.assert_model("gemini-3.1-flash-image", env={"NANO_BANANA_MODEL": "  "})
+
+    def test_blank_flag_is_rejected(self):
+        code, log = self.run_cli(self.output, extra_args=("--model", "  "))
+        self.assertEqual(code, 2, log)
+        self.assertEqual(self.calls, [])
+        self.assertFalse(self.output.exists())
 
 
 if __name__ == "__main__":

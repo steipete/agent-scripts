@@ -2,15 +2,16 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#     "google-genai>=1.0.0",
+#     "google-genai>=3.6.1",
 #     "pillow>=10.0.0",
 # ]
 # ///
 """
-Generate images using Google's Nano Banana 2 (Gemini 3.1 Flash Image) API.
+Generate images with Nano Banana 2 (Gemini 3.1 Flash Image) by default.
+Use --model pro to select Nano Banana Pro (Gemini 3 Pro Image).
 
 Usage:
-    uv run generate_image.py --prompt "your image description" --filename "output.png" [--resolution 512|1K|2K|4K] [--api-key KEY]
+    uv run generate_image.py --prompt "your image description" --filename "output.png" [--resolution 512|1K|2K|4K] [--api-key KEY] [--model flash|pro|MODEL_ID]
 """
 
 import argparse
@@ -18,6 +19,29 @@ import os
 import sys
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
+
+
+# GA IDs are served on google-genai's default v1 API. -preview IDs exist only on v1beta.
+DEFAULT_MODEL = "gemini-3.1-flash-image"
+MODEL_ENV = "NANO_BANANA_MODEL"
+MODEL_ALIASES = {"flash": "gemini-3.1-flash-image", "pro": "gemini-3-pro-image"}
+
+
+def normalize_model(value: str) -> str:
+    value = value.strip()
+    if not value:
+        raise argparse.ArgumentTypeError("model must not be empty")
+    return MODEL_ALIASES.get(value.lower(), value)
+
+
+def select_model(cli_model: str | None) -> str:
+    """Select the flag, then NANO_BANANA_MODEL, then the default."""
+    if cli_model:
+        return cli_model
+    env_model = os.environ.get(MODEL_ENV, "").strip()
+    if env_model:
+        return normalize_model(env_model)
+    return DEFAULT_MODEL
 
 
 def get_api_key(provided_key: str | None) -> str | None:
@@ -76,7 +100,10 @@ def create_output(path: Path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate images using Nano Banana 2 (Gemini 3.1 Flash Image)"
+        description=(
+            "Generate images with Nano Banana 2 (Gemini 3.1 Flash Image) by default. "
+            "Use --model pro to select Nano Banana Pro (Gemini 3 Pro Image)."
+        )
     )
     parser.add_argument(
         "--prompt", "-p",
@@ -103,8 +130,19 @@ def main():
         "--api-key", "-k",
         help="Gemini API key (overrides GEMINI_API_KEY env var)"
     )
+    parser.add_argument(
+        "--model", "-m",
+        type=normalize_model,
+        default=None,
+        metavar="MODEL",
+        help=(
+            "Image model id or alias: flash (default, gemini-3.1-flash-image) or "
+            "pro (gemini-3-pro-image, Nano Banana Pro); overrides NANO_BANANA_MODEL"
+        )
+    )
 
     args = parser.parse_args()
+    model = select_model(args.model)
 
     # Get API key
     api_key = get_api_key(args.api_key)
@@ -153,14 +191,14 @@ def main():
     # Build contents (image first if editing, prompt only if generating)
     if input_image:
         contents = [input_image, args.prompt]
-        print(f"Editing image with resolution {output_resolution}...")
+        print(f"Editing image with resolution {output_resolution} using {model}...")
     else:
         contents = args.prompt
-        print(f"Generating image with resolution {output_resolution}...")
+        print(f"Generating image with resolution {output_resolution} using {model}...")
 
     try:
         response = client.models.generate_content(
-            model="gemini-3.1-flash-image-preview",
+            model=model,
             contents=contents,
             config=types.GenerateContentConfig(
                 response_modalities=["TEXT", "IMAGE"],
